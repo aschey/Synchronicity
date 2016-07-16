@@ -30,10 +30,6 @@ def main(filename):
     numLights = int(input("How many light colors do you want? "))
     numDarks = int(input("How many dark colors do you want? "))
     subprocess.call("clear", shell=True)
-    if numLights > numDarks:
-        numColors = numLights
-    else:
-        numColors = numDarks
     img = Image.open(filename)
     img.thumbnail((200, 200))
     w, h = img.size
@@ -52,7 +48,8 @@ def main(filename):
     lights, darks = separateColors(tmpPoints)
     lightRgbs = createClusters(lights, numLights, "lightcolors.ppm")
     darkRgbs = createClusters(darks, numDarks, "darkcolors.ppm")
-    printToScreen(numColors)
+    allRgbs = lightRgbs + darkRgbs
+    printToScreen(numLights, numDarks)
     #subprocess.call("feh lightcolors.ppm &", shell=True)
     #subprocess.call("feh darkcolors.ppm &", shell=True)
     backgroundIndex = int(input("Which color do you want to be the background? "))
@@ -309,17 +306,20 @@ def writeToPPM(rgbs, filename, numColors):
                         f.write(str(val) + " ")
                     f.write("\n")
 
-def printToScreen(numColors):
-    for i in range(10):
-        print()
-    #command = "printf \"\\n\\n\\n\\n\\n\\n\\n\\n\\n\"; ./drawimage.sh darkcolors.ppm 0; ./drawimage.sh lightcolors.ppm 50; printf \" "
-    command = "./drawimage.sh darkcolors.ppm 60; ./drawimage.sh lightcolors.ppm 116; printf \"\\n\\n\\n\\n\\n\\n\\n\\n\\n\\n   "
-    for i in range(numColors):
-        command += "%2d       "
-    command += "\\n\" "
-    colorNums = map(str, list(range(1, numColors+1)))
-    command += " ".join(colorNums)
-    #print(command)
+def buildFormatString(numColors):
+    return "".join(["\\n" for i in range(6)]) + "   " + "".join(["%2d       " for i in range(numColors)])
+
+def getNumbersString(start, end):
+    return " ".join([str(i) for i in range(start, end)])
+
+def printToScreen(numLights, numDarks):
+    numColors = numDarks + numLights
+    darkFormat = buildFormatString(numDarks)
+    lightFormat = buildFormatString(numLights)
+    darkVals = getNumbersString(1, numDarks + 1)
+    lightVals = getNumbersString(numDarks + 1, numColors + 1)
+
+    command = "./drawimage.sh darkcolors.ppm 60; ./drawimage.sh lightcolors.ppm 140; printf \"{0}\n\" {1}; printf \"{2}\n\" {3};".format(darkFormat, darkVals, lightFormat, lightVals)
     subprocess.call(command, shell=True)
 
 def getPoints(img):
