@@ -13,6 +13,7 @@ from math import sqrt
 from sys import argv
 from sklearn import cluster
 from numpy import array
+from enum import Enum, unique
 import random
 import subprocess
 import os
@@ -22,6 +23,12 @@ import re
 #Cluster = namedtuple('Cluster', ('points', 'center', 'n'))
 
 Line = namedtuple("Line", ("lineNumber", "editIndeces"))
+
+@unique
+class ColorRegex(Enum):
+    hex = "\#\w{6}"
+    rgb = "\d{1,3} \d{1,3} \d{1,3}"
+    decimal = "\d{1,3}"
 
 # convert the decimal color values to a hex string
 rtoh = lambda rgb: '#%s' % ''.join(('%02x' % p for p in rgb))
@@ -54,18 +61,18 @@ def main(filename):
     #subprocess.call("feh darkcolors.ppm &", shell=True)
     backgroundIndex = int(input("Which color do you want to be the background? "))
     foregroundIndex = int(input("Which color do you want to be the foreground? "))
-    cursorIndex = int(input("Which color do you want to be the cursor color? "))
+    palette = (lightRgbs if backgroundIndex < numLights else darkRgbs)
     #print("pick 16 colors")
     otherCols = []
     #for i in range(16):
     #    otherCols.append(colors[int(input())])
-    background = darkRgbs[backgroundIndex]
-    foreground = lightRgbs[foregroundIndex]
-    cursor = lightRgbs[cursorIndex]
+    background = allRgbs[backgroundIndex - 1]
+    foreground = allRgbs[foregroundIndex - 1]
+    cursor = allRgbs[cursorIndex]
     #colors.remove(background)
-    lightRgbs.remove(foreground)
-    lightRgbs.remove(cursor)
-    random.shuffle(lightRgbs)
+    palette.remove(foreground)
+    palette.remove(cursor)
+    random.shuffle(palette)
     #tconfigLines = readTerminatorConfig()
     #writeArrayToFile(tconfigLines, "/home/aschey/.config/terminator/config.backup")
     #modifiedConfig = modifyTerminatorConfig(tconfigLines, lightRgbs, background, foreground, cursor)
@@ -146,37 +153,29 @@ class Rule(object):
         self.mode = ""
         self.lines = []
 
-    @staticmethod
-    def create():
+    def create(self):
         lines = []
         count = 1
         lineNo = 1
-        rule = Rule()
-        self.filename = input("Enter the full file path: ")
+        self.filename = os.path.expanduser(input("Enter the file path: ")).strip()
         self.appName = input("Enter the application name: ")
         print("Enter the color input format.")
         print("Choices are:")
         print("'hex' eg. #00ff00")
         print("'rgb' eg. 123 435 643")
         print("'numeric' eg. 234")
-        rule.mode = input()
-        if rule.mode == "hex":
-            search = re.compile("\#\w{6}")
-        elif rule.mode == "rgb":
-            search = re.compile("\d{1,3} \d{1,3} \d{1,3}")
-        else:
-            search = re.compile("\d{1,3}")
-        autodetect = input("Try to autodetect lines which contain colors? This \
-                may return a lot of false positives if 'numeric' mode is selected. Enter (y/n): ")
-        if autodetect == "y":
+        self.mode = ColorRegex[input()]
+        search = re.compile(self.mode.value)
+        autodetect = input("Try to autodetect lines which contain colors? This may return a lot of false positives if 'numeric' mode is selected. [Y/n] ")
+        if autodetect in ["", "Y", "y"]:
             tempLines = []
             print("Possible lines to modify found:")
-            with open(rule.filename, "r") as f:
+            with open(self.filename, "r") as f:
                 for line in f:
                     matches = search.findall(line)
                     if len(matches) > 0:
-                        textLine = Line(lineNumber = lineNo, editIndeces = [])
-                        print(str(count) + ". " + line)
+                        textLine = Line(lineNumber = str(lineNo), editIndeces = [])
+                        print(str(count) + ". " + line.strip())
                         count += 1
                         start = 0
                         for match in matches:
@@ -184,51 +183,49 @@ class Rule(object):
                             textLine.editIndeces.append(indeces)
                             start = indeces[1]
                         tempLines.append(textLine)
-                lineNo += 1
-            linesToModify = input("Enter which lines you wish to modify. Do not include spaces. Example: 2-5,8,10: ")
-            linesToModify = linesToModify.split(",")
+                    lineNo += 1
+            linesToModify = input("Enter which lines you wish to modify. Enter nothing to modify all lines. Example: 2-5,8,10: ").replace(" ", "")
+            modifyList = linesToModify.split(",")
+            modifyAll = (True if len(linesToModify) == 0 else False)
             modifyIndeces = []
-            for lineNumber in linesToModify:
-                print(lineNumber)
-                try:
-                    lineNumber = int(lineNumber)
-                    modifyIndeces.append(lineNumber)
-                except ValueError:
-                    start = int(lineNumber[0])
-                    end = int(lineNumber[2])
-                    for i in range(start, end+1):
-                        modifyIndeces.append(i)
+            if not modifyAll:
+                for lineNumber in modifyList:
+                    try:
+                        lineNumber = int(lineNumber)
+                        modifyIndeces.append(lineNumber)
+                    except ValueError:
+                        start = int(lineNumber[0])
+                        end = int(lineNumber[2])
+                        for i in range(start, end + 1):
+                            modifyIndeces.append(i)
             modifyList = sorted(modifyIndeces)
             for i in range(len(tempLines)):
-                if i in modifyList:
-                    rule.lines.append(line)
-            #for line in tempLines:
-            #    if line.foundIndex in modifyList:
-            #        self.lines.append(line)
+                if modifyAll or i in modifyList:
+                    self.lines.append(tempLines[i])
+
+            self.save()
 
     def getIndeces(self, start, match, line):
         for i in range(start, len(line) - len(match)):
-            if line[i:i+len(match)] == match:
-                return (i, i+len(match))
+            if line[i:i + len(match)] == match:
+                return (i, i + len(match))
         return None
 
-    @staticmethod
-    def save(rules):
+    def save(self):
         if not os.path.isdir("/home/aschey/.synchronicity"):
             subprocess.call("mkdir /home/aschey/.synchronicity", shell=True)
-        with open("/home/aschey/.synchronicity/rules.config", "w") as f:
-            for rule in self.rules:
-                f.write("[Rule]\n")
-                f.write("application_name: " + rule.appName + "\n")
-                f.write("filename: " + rule.filename + "\n")
-                f.write("mode: " + rule.mode + "\n")
-                for line in self.rules.lines:
-                    f.write("line_number: " + line.lineNumber + "\n")
-                    f.write("substrings_to_edit: " + str(editIndeces) + "\n")
-                f.write("[/Rule]\n\n")
+        with open("/home/aschey/.synchronicity/rules.config", "a") as f:
+            f.write("[Rule]\n")
+            f.write("application_name: " + self.appName + "\n")
+            f.write("filename: " + self.filename + "\n")
+            f.write("mode: " + self.mode.name + "\n")
+            for line in self.lines:
+                f.write("line_number: " + line.lineNumber + "\n")
+                f.write("substrings_to_edit: " + str(line.editIndeces) + "\n")
+            f.write("[/Rule]\n\n")
 
     @staticmethod
-    def load():
+    def loadAll():
         rules = []
         with open("/home/aschey/.synchroncitiy/rules.config", "r") as f:
             for line in f:
@@ -262,6 +259,21 @@ def isLight(rgb):
 
 def isDark(rgb):
     return ((rgb[0] * 299) + (rgb[1] * 587) + (rgb[2] * 114)) / 1000 <= 25
+
+def callCommand(command):
+    subprocess.call(command, Shell = True)
+
+def backupConfigs(filenames):
+    command = ""
+    for filename in filenames:
+        command += "cp {1} {1}.backup; ".format(filename)
+
+    callCommand(command)
+
+def modifyConfigFiles():
+    rules = Rule.loadAll()
+    filenames = [rule.filename for rule in rules]
+    backupConfigs(filenames)
 
 def modifyTerminatorConfig(tconfigLines, colors, background, foreground, cursor):
     configColors = ":".join(colors)
@@ -319,8 +331,8 @@ def printToScreen(numLights, numDarks):
     darkVals = getNumbersString(1, numDarks + 1)
     lightVals = getNumbersString(numDarks + 1, numColors + 1)
 
-    command = "./drawimage.sh darkcolors.ppm 60; ./drawimage.sh lightcolors.ppm 140; printf \"{0}\n\" {1}; printf \"{2}\n\" {3};".format(darkFormat, darkVals, lightFormat, lightVals)
-    subprocess.call(command, shell=True)
+    command = "./drawimage.sh lightcolors.ppm 60; ./drawimage.sh darkcolors.ppm 140; printf \"{0}\n\" {1}; printf \"{2}\n\" {3};".format(lightFormat, lightVals, darkFormat, darkVals)
+    callCommand(command)
 
 def getPoints(img):
     points = []
@@ -372,6 +384,6 @@ def kmeans(points, k, minDiff):
 
     return clusters
 
-main('/home/aschey/Pictures/wallpapers/deja_entendu.jpeg')
-#rule = Rule()
-#rule.createRule()
+#main('/home/aschey/Pictures/wallpapers/deja_entendu.jpeg')
+rule = Rule()
+rule.create()
