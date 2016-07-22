@@ -1,4 +1,3 @@
-#Author: Charles Leifer
 #TODO:
     # enforce min distance between colors
     # auto-detect which config lines to edit
@@ -15,77 +14,14 @@ from sys import argv
 from sklearn import cluster
 from numpy import array
 from enum import Enum, unique
+from configobj import ConfigObj
 import random
 import subprocess
 import os
 import re
 
 CONFIG_DIR = os.path.expanduser("~/.synchronicity")
-CONFIG_FILE_PATH = CONFIG_DIR + "/rules.config"
-
-#Point = namedtuple('Point', ('coords', 'n', 'ct'))
-#Cluster = namedtuple('Cluster', ('points', 'center', 'n'))
-
-class Line(object): #= namedtuple("Line", ("lineNumber", "editIndeces", "useCursorColor", "useBackgroundColor", "useForegroundColor"))
-    def __init__(self, lineNumber, useCursorColor = False, useBackgroundColor = False, useForegroundColor = False):
-        self.lineNumber = lineNumber
-        self.editIndeces = []
-        self.useCursorColor = useCursorColor
-        self.useBackgroundColor = useBackgroundColor
-        self.useForegroundColor = useForegroundColor
-
-
-@unique
-class ColorRegex(Enum):
-    hex = "\#\w{6}"
-    rgb = "\d{1,3} \d{1,3} \d{1,3}"
-    decimal = "\d{1,3}"
-
-# convert the decimal color values to a hex string
-rtoh = lambda rgb: '#%s' % ''.join(('%02x' % p for p in rgb))
-
-def main(filename):
-    numLights = int(input("How many light colors do you want? "))
-    numDarks = int(input("How many dark colors do you want? "))
-    subprocess.call("clear", shell=True)
-    img = Image.open(filename)
-    img.thumbnail((200, 200))
-    w, h = img.size
-    #rules = Rule.load()
-    # get all rgb color values in the image and the amount of each
-    #points = getPoints(img)
-    tmpPoints = []
-    #for count, color in img.getcolors(w*h):
-    #    for i in range(count):
-    #        newcolor = []
-    #        for c in color:
-    #            newcolor.append(c)# + random.randint(-5,5))
-    #        tmpPoints.append(newcolor)
-    for count, color in img.getcolors(w * h):
-        tmpPoints.append(color)
-    lights, darks = separateColors(tmpPoints)
-    lightRgbs = createClusters(lights, numLights, "lightcolors.ppm")
-    darkRgbs = createClusters(darks, numDarks, "darkcolors.ppm")
-    allRgbs = lightRgbs + darkRgbs
-    printToScreen(numLights, numDarks)
-    #subprocess.call("feh lightcolors.ppm &", shell=True)
-    #subprocess.call("feh darkcolors.ppm &", shell=True)
-    backgroundIndex = int(input("Which color do you want to be the background? "))
-    foregroundIndex = int(input("Which color do you want to be the foreground? "))
-    cursorIndex = int(input("Which color do you want to be the cursor? "))
-    palette = (lightRgbs if backgroundIndex > numLights else darkRgbs)
-    #print("pick 16 colors")
-    otherCols = []
-    #for i in range(16):
-    #    otherCols.append(colors[int(input())])
-    background = allRgbs[backgroundIndex - 1]
-    foreground = allRgbs[foregroundIndex - 1]
-    cursor = allRgbs[cursorIndex - 1]
-    #colors.remove(background)
-    palette.remove(foreground)
-    palette.remove(cursor)
-    random.shuffle(palette)
-    Theme().create(palette, background, foreground, cursor)
+CONFIG_FILE_PATH = CONFIG_DIR + "/rules.ini"
 
 def createClusters(points, n, filename):
     kmeans = cluster.KMeans(n_clusters = n)
@@ -94,6 +30,83 @@ def createClusters(points, n, filename):
     rgbs = [list(map(int, c)) for c in clusters]
     writeToPPM(rgbs, filename, n)
     return list(map(rtoh, rgbs))
+
+# convert the decimal color values to a hex string
+def rgbToHex(rgb):
+    return "#" + "".join("{0:x}".format(val) for val in rgb)
+
+def separateColors(rgbs):
+    lights = []
+    darks = []
+    for c in rgbs:
+        if isLight(c):
+            lights.append(c)
+        elif isDark(c):
+            darks.append(c)
+    return lights, darks
+
+def isLight(rgb):
+    return ((rgb[0] * 299) + (rgb[1] * 587) + (rgb[2] * 114)) / 1000 >= 50
+
+def isDark(rgb):
+    return ((rgb[0] * 299) + (rgb[1] * 587) + (rgb[2] * 114)) / 1000 <= 25
+
+def callCommand(command):
+    subprocess.call(command, shell = True)
+
+def getFilePath(*args):
+    pathElements = [CONFIG_DIR] + list(args)
+    return "/".join(pathElements)
+
+def writeArrayToFile(fileLines, newFileName):
+    # Note: Assumes newlines are already included
+    with open(newFileName, "w") as f:
+        for line in fileLines:
+            f.write(line)
+
+def writeToPPM(rgbs, filename, numColors):
+    colorwidth = 54
+    with open(filename, 'w') as f:
+        f.write('P3\n')
+        f.write(str(numColors * colorwidth) + " " + str(colorwidth) + "\n")
+        f.write('255\n')
+        for i in range(colorwidth):
+            for rgb in rgbs:
+                for j in range(colorwidth):
+                    for val in rgb:
+                        f.write(str(val) + " ")
+                    f.write("\n")
+
+def buildFormatString(numColors):
+    return "".join(["\\n" for i in range(6)]) + "   " + "".join(["%2d       " for i in range(numColors)])
+
+def getNumbersString(start, end):
+    return " ".join([str(i) for i in range(start, end)])
+
+def printToScreen(numLights, numDarks):
+    numColors = numDarks + numLights
+    lightFormat = buildFormatString(numLights)
+    darkFormat = buildFormatString(numDarks)
+    lightVals = getNumbersString(1, numLights + 1)
+    darkVals = getNumbersString(numLights + 1, numColors + 1)
+
+    command = "./drawimage.sh lightcolors.ppm 60; ./drawimage.sh darkcolors.ppm 140; printf \"{0}\n\" {1}; printf \"{2}\n\" {3};".format(lightFormat, lightVals, darkFormat, darkVals)
+    callCommand(command)
+
+
+@unique
+class ColorRegex(Enum):
+    hex = "\#\w{6}"
+    rgb = "\d{1,3} \d{1,3} \d{1,3}"
+    decimal = "\d{1,3}"
+
+class Line(object): #= namedtuple("Line", ("lineNumber", "editIndeces", "useCursorColor", "useBackgroundColor", "useForegroundColor"))
+    def __init__(self, lineNumber, useCursorColor = False, useBackgroundColor = False, useForegroundColor = False):
+        self.lineNumber = lineNumber
+        self.editIndeces = []
+        self.useCursorColor = useCursorColor
+        self.useBackgroundColor = useBackgroundColor
+        self.useForegroundColor = useForegroundColor
 
 class Theme(object):
     def __init__(self):
@@ -248,22 +261,28 @@ class Rule(object):
     def save(self):
         if not os.path.isdir(CONFIG_DIR):
             callCommand("mkdir " + CONFIG_DIR)
-        with open(CONFIG_FILE_PATH, "a") as f:
-            f.write("[Rule]\n")
-            f.write("application_name: " + self.appName + "\n")
-            f.write("file_path: " + self.filename + "\n")
-            f.write("mode: " + self.mode.name + "\n")
-            for line in self.lines:
-                f.write("line_number: " + line.lineNumber + "\n")
-                if line.useCursorColor:
-                    f.write("<cursor>\n")
-                if line.useBackgroundColor:
-                    f.write("<background>\n")
-                if line.useForegroundColor:
-                    f.write("<foreground>\n")
-                f.write("substrings_to_edit: " + str(line.editIndeces) + "\n")
-            f.write("[/Rule]\n\n")
 
+        config = ConfigObj(indent_type = "\t")
+        config.filename = CONFIG_FILE_PATH
+        config[self.appName] = {}
+        configRule = config[self.appName]
+        configRule["filePath"] = self.filePath
+        configRule["mode"] = self.mode.name
+
+        for line in self.lines:
+            lineNumber = "lineNumber: " + line.lineNumber
+            configRule[lineNumber] = {}
+            lineConfig = configRule[lineNumber]
+            if line.useCursorColor:
+                lineConfig["cursor"] = True
+            if line.useBackgroundColor:
+                lineConfig["background"] = True
+            if line.useForegroundColor:
+                lineConfig["foreground"] = True
+            lineConfig["substringsToEdit"] = str(line.editIndeces)
+
+        config.write()
+        
     @staticmethod
     def loadAll():
         rules = []
@@ -297,28 +316,49 @@ class Rule(object):
         splitLine = line.strip().split(": ")
         return (None, None) if len(splitLine) < 2 else (splitLine[0], splitLine[1])
 
-def separateColors(rgbs):
-    lights = []
-    darks = []
-    for c in rgbs:
-        if isLight(c):
-            lights.append(c)
-        elif isDark(c):
-            darks.append(c)
-    return lights, darks
+def main(filename):
+    numLights = int(input("How many light colors do you want? "))
+    numDarks = int(input("How many dark colors do you want? "))
+    subprocess.call("clear", shell=True)
+    img = Image.open(filename)
+    img.thumbnail((200, 200))
+    w, h = img.size
+    #rules = Rule.load()
+    # get all rgb color values in the image and the amount of each
+    #points = getPoints(img)
+    tmpPoints = []
+    #for count, color in img.getcolors(w*h):
+    #    for i in range(count):
+    #        newcolor = []
+    #        for c in color:
+    #            newcolor.append(c)# + random.randint(-5,5))
+    #        tmpPoints.append(newcolor)
+    for count, color in img.getcolors(w * h):
+        tmpPoints.append(color)
+    lights, darks = separateColors(tmpPoints)
+    lightRgbs = createClusters(lights, numLights, "lightcolors.ppm")
+    darkRgbs = createClusters(darks, numDarks, "darkcolors.ppm")
+    allRgbs = lightRgbs + darkRgbs
+    printToScreen(numLights, numDarks)
+    #subprocess.call("feh lightcolors.ppm &", shell=True)
+    #subprocess.call("feh darkcolors.ppm &", shell=True)
+    backgroundIndex = int(input("Which color do you want to be the background? "))
+    foregroundIndex = int(input("Which color do you want to be the foreground? "))
+    cursorIndex = int(input("Which color do you want to be the cursor? "))
+    palette = (lightRgbs if backgroundIndex > numLights else darkRgbs)
+    #print("pick 16 colors")
+    otherCols = []
+    #for i in range(16):
+    #    otherCols.append(colors[int(input())])
+    background = allRgbs[backgroundIndex - 1]
+    foreground = allRgbs[foregroundIndex - 1]
+    cursor = allRgbs[cursorIndex - 1]
+    #colors.remove(background)
+    palette.remove(foreground)
+    palette.remove(cursor)
+    random.shuffle(palette)
+    Theme().create(palette, background, foreground, cursor)
 
-def isLight(rgb):
-    return ((rgb[0] * 299) + (rgb[1] * 587) + (rgb[2] * 114)) / 1000 >= 50
-
-def isDark(rgb):
-    return ((rgb[0] * 299) + (rgb[1] * 587) + (rgb[2] * 114)) / 1000 <= 25
-
-def callCommand(command):
-    subprocess.call(command, shell = True)
-
-def getFilePath(*args):
-    pathElements = [CONFIG_DIR] + list(args)
-    return "/".join(pathElements)
 
                     
 
@@ -339,11 +379,6 @@ def getFilePath(*args):
 #
 #    return modifiedConfig
             
-def writeArrayToFile(fileLines, newFileName):
-    # Note: Assumes newlines are already included
-    with open(newFileName, "w") as f:
-        for line in fileLines:
-            f.write(line)
 
 #def readTerminatorConfig():
 #    tconfigLines = []
@@ -352,34 +387,6 @@ def writeArrayToFile(fileLines, newFileName):
 #            tconfigLines.append(line)
 #    return tconfigLines
 
-def writeToPPM(rgbs, filename, numColors):
-    colorwidth = 54
-    with open(filename, 'w') as f:
-        f.write('P3\n')
-        f.write(str(numColors * colorwidth) + " " + str(colorwidth) + "\n")
-        f.write('255\n')
-        for i in range(colorwidth):
-            for rgb in rgbs:
-                for j in range(colorwidth):
-                    for val in rgb:
-                        f.write(str(val) + " ")
-                    f.write("\n")
-
-def buildFormatString(numColors):
-    return "".join(["\\n" for i in range(6)]) + "   " + "".join(["%2d       " for i in range(numColors)])
-
-def getNumbersString(start, end):
-    return " ".join([str(i) for i in range(start, end)])
-
-def printToScreen(numLights, numDarks):
-    numColors = numDarks + numLights
-    lightFormat = buildFormatString(numLights)
-    darkFormat = buildFormatString(numDarks)
-    lightVals = getNumbersString(1, numLights + 1)
-    darkVals = getNumbersString(numLights + 1, numColors + 1)
-
-    command = "./drawimage.sh lightcolors.ppm 60; ./drawimage.sh darkcolors.ppm 140; printf \"{0}\n\" {1}; printf \"{2}\n\" {3};".format(lightFormat, lightVals, darkFormat, darkVals)
-    callCommand(command)
 
 def getPoints(img):
     points = []
@@ -431,6 +438,6 @@ def kmeans(points, k, minDiff):
 
     return clusters
 
-main('/home/aschey/Pictures/wallpapers/deja_entendu.jpeg')
-#rule = Rule()
-#rule.create()
+if __name__ == "__main__":
+    #main('/home/aschey/Pictures/wallpapers/deja_entendu.jpeg')
+    Rule().create()
