@@ -29,11 +29,11 @@ def createClusters(points, n, filename):
     clusters = [c[:3] for c in kmeans.cluster_centers_]
     rgbs = [list(map(int, c)) for c in clusters]
     writeToPPM(rgbs, filename, n)
-    return list(map(rtoh, rgbs))
+    return list(map(rgbToHex, rgbs))
 
 # convert the decimal color values to a hex string
 def rgbToHex(rgb):
-    return "#" + "".join("{0:x}".format(val) for val in rgb)
+    return "#" + "".join("{0:02x}".format(val) for val in rgb)
 
 def separateColors(rgbs):
     lights = []
@@ -112,6 +112,11 @@ class Theme(object):
     def __init__(self):
         self.name = ""
         self.files = {}
+        self.palette = []
+        self.foreground = ""
+        self.background = ""
+        self.cursor = ""
+        self.colorIndex = 0
 
     #def save():
     #    self.name = input("Enter the theme name: ")
@@ -145,56 +150,64 @@ class Theme(object):
 
         return theme
 
-    def backupConfigs(self, filePaths):
-        command = ""
-        for path in filePaths:
-            filename = path.split("/")[-1]
-            command += "cp {0} {1}; ".format(path, getFilePath(self.name, filename + ".backup"))
-
+    def backupConfig(self, rule):
+        command = "cp {0} {1}".format(rule.filePath, getFilePath(self.name, rule.appName + ".backup"))
         callCommand(command)
 
-    def updateConfigFiles(self, colors, background, foreground, cursor):
+    def nextColor(self, line):
+        if line.useBackgroundColor:
+            return self.background
+        if line.useForegroundColor:
+            return self.foreground
+        if line.useCursorColor:
+            return self.cursor
+        color = self.palette[self.colorIndex]
+        self.colorIndex += 1
+        if self.colorIndex == len(self.palette):
+            self.colorIndex = 0
+        return color
+
+
+    def updateConfigFiles(self):
         rules = Rule.loadAll()
-        self.backupConfigs([rule.filePath for rule in rules])
 
         for rule in rules:
+            self.backupConfig(rule)
             colorIndex = 0
-            with open(rule.filename, "r") as f:
-                fileArray = [line for line in f]
+            with open(rule.filePath, "r") as f:
+                configLines = [line for line in f]
             for line in rule.lines:
-                editLine = fileArray[line.lineNumber]
-                newLine = line
-                if line.useBackgroundColor:
-                    color = background
-                elif line.useForgroundColor:
-                    color = foreground
-                elif line.useCursorColor:
-                    color = cursor
-                else:
-                    color = colors[colorIndex]
-                    colorIndex += 1
+                editLine = configLines[line.lineNumber]
+                newLine = editLine
                 for indeces in line.editIndeces:
-                    newLine = self.changeLine(newLine, indeces[0], indeces[1], color)
-                newFile.append(newLine)
+                    newLine = self.changeLine(newLine, indeces[0], indeces[1], self.nextColor(line))
+                configLines[line.lineNumber] = newLine
 
-            writeArrayToFile(newFile, getFilePath(self.name, rule.name))
+            writeArrayToFile(configLines, getFilePath(self.name, rule.appName))
                 
                     
 
-    def create(self,  newColors, background, foreground, cursor):
+    def create(self, newColors, background, foreground, cursor):
+        self.palette = newColors
+        self.background = background
+        self.foreground = foreground
+        self.cursor = cursor
         self.name = input("Enter the theme name: ")
         callCommand("mkdir " + getFilePath(self.name))
-        self.updateConfigFiles(newColors, background, foreground, cursor)
+        self.updateConfigFiles()
 
     def changeLine(self, line, start, end, newValue):
         return line[:start] + newValue + line[end:]
 
 class Rule(object):
+    config = ConfigObj(CONFIG_FILE_PATH, indent_type = "\t", unrepr = True)
+
     def __init__(self):
         self.filePath = ""
         self.appName = ""
         self.mode = ""
         self.lines = []
+        
 
     def create(self):
         lines = []
@@ -217,7 +230,7 @@ class Rule(object):
                 for line in f:
                     matches = search.findall(line)
                     if len(matches) > 0:
-                        textLine = Line(lineNumber = str(lineNo), 
+                        textLine = Line(lineNumber = lineNo, 
                                 useCursorColor = (True if "cursor" in line else False),
                                 useBackgroundColor = (True if "background" in line else False),
                                 useForegroundColor = (True if "foreground" in line else False))
@@ -262,59 +275,52 @@ class Rule(object):
         if not os.path.isdir(CONFIG_DIR):
             callCommand("mkdir " + CONFIG_DIR)
 
-        config = ConfigObj(indent_type = "\t")
-        config.filename = CONFIG_FILE_PATH
-        config[self.appName] = {}
-        configRule = config[self.appName]
+        Rule.config[self.appName] = {}
+        configRule = Rule.config[self.appName]
         configRule["filePath"] = self.filePath
         configRule["mode"] = self.mode.name
-
+        lineNumber = 1
         for line in self.lines:
-            lineNumber = "lineNumber: " + line.lineNumber
-            configRule[lineNumber] = {}
-            lineConfig = configRule[lineNumber]
+            lineHeader = "line " + str(lineNumber)
+            lineNumber += 1
+
+            configRule[lineHeader] = {}
+            lineConfig = configRule[lineHeader]
+            lineConfig["lineNumber"] = line.lineNumber
             if line.useCursorColor:
                 lineConfig["cursor"] = True
             if line.useBackgroundColor:
                 lineConfig["background"] = True
             if line.useForegroundColor:
                 lineConfig["foreground"] = True
-            lineConfig["substringsToEdit"] = str(line.editIndeces)
 
-        config.write()
+            lineConfig["substringsToEdit"] = line.editIndeces
+
+        Rule.config.write()
         
     @staticmethod
     def loadAll():
         rules = []
-        with open(CONFIG_FILE_PATH, "r") as f:
-            for line in f:
-                line = line.strip()
-                key, value = Rule.splitConfigLine(line)
-                if line == "[Rule]":
-                    rule = Rule()
-                elif key == "file_path":
-                    rule.filename = value
-                elif key == "mode":
-                    rule.mode = value
-                elif key == "line_number":
-                    newLine = Line(lineNumber = value)
-                elif line == "<cursor>":
-                    newLine.useCursorColor = True
-                elif line == "<background>":
-                    newLine.useBackgroundColor = True
-                elif line == "<foreground>":
-                    newLine.useForegroundColor = True
-                elif key == "substrings_to_edit":
-                    newLine.editIndeces = list(value)
-                    rule.lines.append(newLine)
-                elif line == "[/Rule]":
-                    rules.append(rule)
+        for appName, values in Rule.config.items():
+            rule = Rule()
+            rule.appName = appName
+            rule.filePath = values["filePath"]
+            rule.mode = values["mode"]
+
+            for key, lineValues in Rule.getLineNumberItems(appName):
+                line = Line(lineNumber = lineValues["lineNumber"])
+                line.useCursorColor = lineValues.get("cursor", False)
+                line.useBackgroundColor = lineValues.get("background", False)
+                line.useForegroundColor = lineValues.get("foreground", False)
+                line.editIndeces = lineValues["substringsToEdit"]
+                rule.lines.append(line) 
+            rules.append(rule)
+
         return rules
 
     @staticmethod
-    def splitConfigLine(line):
-        splitLine = line.strip().split(": ")
-        return (None, None) if len(splitLine) < 2 else (splitLine[0], splitLine[1])
+    def getLineNumberItems(appName):
+        return [(key, value) for key, value in Rule.config[appName].items() if key.startswith("line ")]
 
 def main(filename):
     numLights = int(input("How many light colors do you want? "))
@@ -439,5 +445,5 @@ def kmeans(points, k, minDiff):
     return clusters
 
 if __name__ == "__main__":
-    #main('/home/aschey/Pictures/wallpapers/deja_entendu.jpeg')
-    Rule().create()
+    main('/home/aschey/Pictures/wallpapers/deja_entendu.jpeg')
+    #Rule().create()
