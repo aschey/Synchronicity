@@ -24,6 +24,8 @@ import re
 CONFIG_DIR = os.path.expanduser("~/.synchronicity")
 CONFIG_FILE_PATH = CONFIG_DIR + "/rules.ini"
 
+global Rules
+
 def createClusters(points, n, filename):
     kmeans = cluster.KMeans(n_clusters = n)
     kmeans.fit(points)
@@ -84,6 +86,12 @@ def buildFormatString(numColors):
 def getNumbersString(start, end):
     return " ".join([str(i) for i in range(start, end)])
 
+def copyFiles(sourceDestPairs):
+    command = ""
+    for sourceDestPair in sourceDestPairs:
+        command += "cp {0} {1};".format(sourceDestPair[0], sourceDestPair[1])
+    callCommand(command)
+
 def printToScreen(numLights, numDarks):
     numColors = numDarks + numLights
     lightFormat = buildFormatString(numLights)
@@ -136,15 +144,19 @@ def createTheme(args):
     Theme(palette, background, foreground, cursor)
 
 def backup(args):
-    rules = Rule.loadAll()
-    for rule in rules:
-        command = "cp {0} {1}".format(rule.filePath, getFilePath(rule.appName + ".backup"))
-        callCommand(command)
-
+    sourceDestPairs = [(rule.filePath, getFilePath(rule.appName + ".backup")) for rule in Rules]
+    copyFiles(sourceDestPairs)
 
 def createRule(args):
     autodetect = not args.no_autodetect
     Rule(args.f, args.a, args.i).create(autodetect)
+
+def loadTheme(args):
+    Theme.load(args.n)
+
+def revert(args):
+    sourceDestPairs = [(getFilePath(rule.appName + ".backup"), rule.filePath) for rule in Rules]
+    copyFiles(sourceDestPairs)
 
 def parseArgs():
     argParser = ArgumentParser()
@@ -165,6 +177,13 @@ def parseArgs():
 
     backupParser = subparsers.add_parser("backup")
     backupParser.set_defaults(func = backup)
+
+    loadParser = subparsers.add_parser("load")
+    loadParser.add_argument("-n", required = True)
+    loadParser.set_defaults(func = loadTheme)
+
+    revertParser = subparsers.add_parser("revert")
+    revertParser.set_defaults(func = revert)
 
     args = argParser.parse_args()
     if hasattr(args, "func"):
@@ -207,32 +226,33 @@ class Theme(object):
     #            for line in self.files[appName]:
     #                f.write("\t" + line + "\n")
     #            f.write("[/" + appName + "]\n\n")
-
+    
     @staticmethod
     def load(name):
-        #for file in os.listdir(getFilePath(name))
+        sourceDestPairs = [(getFilePath(name, rule.appName), rule.filePath) for rule in Rules]
+        print(Rules)
+        copyFiles(sourceDestPairs)
 
+        #theme = Theme()
+        #theme.name = filename[:-6]
+        #addLines = False
+        #with open(filename, "r") as f:
+        #    for line in f:
+        #        if line[:4] == "name":
+        #            appName = line[7:]
+        #            theme.files[appName] = []
+        #            addLines = True
+        #        elif addLines:
+        #            theme.files[appName].append(line#)
+        #        
+        #        if line == "[/Application#]":
+        #            addLines = False
 
-        theme = Theme()
-        theme.name = filename[:-6]
-        addLines = False
-        with open(filename, "r") as f:
-            for line in f:
-                if line[:4] == "name":
-                    appName = line[7:]
-                    theme.files[appName] = []
-                    addLines = True
-                elif addLines:
-                    theme.files[appName].append(line)
-                
-                if line == "[/Application]":
-                    addLines = False
+        #return theme
 
-        return theme
-
-    def backupConfig(self, rule):
-        command = "cp {0} {1}".format(rule.filePath, getFilePath(self.name, rule.appName + ".backup"))
-        callCommand(command)
+    #def backupConfig(self, rule):
+    #    command = "cp {0} {1}".format(rule.filePath, getFilePath(self.name, rule.appName + ".backup"))
+    #    callCommand(command)
 
     def nextColor(self, line):
         if line.useBackgroundColor:
@@ -252,7 +272,7 @@ class Theme(object):
         rules = Rule.loadAll()
 
         for rule in rules:
-            self.backupConfig(rule)
+            #self.backupConfig(rule)
             colorIndex = 0
             with open(rule.filePath, "r") as f:
                 configLines = [line for line in f]
@@ -282,7 +302,6 @@ class Theme(object):
 class Rule(object):
     config = ConfigObj(CONFIG_FILE_PATH, indent_type = "\t", unrepr = True)
 
-   
     def __init__(self, filePath, appName, inputFormat):
         self.filePath = os.path.expanduser(filePath.strip())
         self.appName = appName
@@ -399,6 +418,8 @@ class Rule(object):
         return [(key, value) for key, value in Rule.config[appName].items() if key.startswith("line ")]
 
 def main(filename):
+    global Rules
+    Rules = Rule.loadAll()
     parseArgs()
 
     
