@@ -95,12 +95,9 @@ def printToScreen(numLights, numDarks):
     callCommand(command)
 
 def createTheme(args):
-    print("hi")
-    print(args)
-    return
-    #numLights = int(input("How many light colors do you want? "))
-    #numDarks = int(input("How many dark colors do you want? "))
-    #subprocess.call("clear", shell=True)
+    numLights = args.l
+    numDarks = args.d
+    subprocess.call("clear", shell=True)
     img = Image.open(filename)
     img.thumbnail((200, 200))
     w, h = img.size
@@ -121,8 +118,6 @@ def createTheme(args):
     darkRgbs = createClusters(darks, numDarks, "darkcolors.ppm")
     allRgbs = lightRgbs + darkRgbs
     printToScreen(numLights, numDarks)
-    #subprocess.call("feh lightcolors.ppm &", shell=True)
-    #subprocess.call("feh darkcolors.ppm &", shell=True)
     backgroundIndex = int(input("Which color do you want to be the background? "))
     foregroundIndex = int(input("Which color do you want to be the foreground? "))
     cursorIndex = int(input("Which color do you want to be the cursor? "))
@@ -138,23 +133,44 @@ def createTheme(args):
     palette.remove(foreground)
     palette.remove(cursor)
     random.shuffle(palette)
-    Theme().create(palette, background, foreground, cursor)
+    Theme(palette, background, foreground, cursor)
 
+def backup(args):
+    rules = Rule.loadAll()
+    for rule in rules:
+        command = "cp {0} {1}".format(rule.filePath, getFilePath(rule.appName + ".backup"))
+        callCommand(command)
+
+
+def createRule(args):
+    autodetect = not args.no_autodetect
+    Rule(args.f, args.a, args.i).create(autodetect)
 
 def parseArgs():
     argParser = ArgumentParser()
     subparsers = argParser.add_subparsers()
 
-    createParser = subparsers.add_parser("create")
-    createParser.add_argument("-f", required = True)
-    createParser.add_argument("-l", type = int, required = True)
-    createParser.add_argument("-d", type = int, required = True)
-    createParser.set_defaults(func = createTheme)
+    themeParser = subparsers.add_parser("theme")
+    themeParser.add_argument("-f", required = True)
+    themeParser.add_argument("-l", type = int, required = True)
+    themeParser.add_argument("-d", type = int, required = True)
+    themeParser.set_defaults(func = createTheme)
 
-    #argParser.add_argument("-l", required = True)
-    #argParser.add_argument("-d", required = True)
+    ruleParser = subparsers.add_parser("rule")
+    ruleParser.add_argument("-f", required = True)
+    ruleParser.add_argument("-a", required = True)
+    ruleParser.add_argument("-i", choices = ["hex", "rgb", "numeric"], required = True)
+    ruleParser.add_argument("--no-autodetect", action = "store_true")
+    ruleParser.set_defaults(func = createRule)
+
+    backupParser = subparsers.add_parser("backup")
+    backupParser.set_defaults(func = backup)
+
     args = argParser.parse_args()
-    args.func(args)
+    if hasattr(args, "func"):
+        args.func(args)
+    else:
+        argParser.parse_args(["-h"])
 
 @unique
 class ColorRegex(Enum):
@@ -179,6 +195,8 @@ class Theme(object):
         self.background = ""
         self.cursor = ""
         self.colorIndex = 0
+
+        self.create(newColors, background, foreground, cursor)
 
     #def save():
     #    self.name = input("Enter the theme name: ")
@@ -264,28 +282,22 @@ class Theme(object):
 class Rule(object):
     config = ConfigObj(CONFIG_FILE_PATH, indent_type = "\t", unrepr = True)
 
-    def __init__(self):
-        self.filePath = ""
-        self.appName = ""
-        self.mode = ""
+   
+    def __init__(self, filePath, appName, inputFormat):
+        self.filePath = os.path.expanduser(filePath.strip())
+        self.appName = appName
+        self.mode = ColorRegex[inputFormat]
         self.lines = []
-        
 
-    def create(self):
+    def create(self, autodetect):
         lines = []
         count = 1
         lineNo = 0
-        self.filePath = os.path.expanduser(input("Enter the file path: ")).strip()
-        self.appName = input("Enter the application name: ")
-        print("Enter the color input format.")
-        print("Choices are:")
-        print("'hex' eg. #00ff00")
-        print("'rgb' eg. 123 435 643")
-        print("'numeric' eg. 234")
-        self.mode = ColorRegex[input()]
+        #self.filePath = os.path.expanduser(filePath.strip())
+        #self.appName = appName
+        #self.mode = ColorRegex[inputFormat]
         search = re.compile(self.mode.value)
-        autodetect = input("Try to autodetect lines which contain colors? This may return a lot of false positives if 'numeric' mode is selected. [Y/n] ")
-        if autodetect in ["", "Y", "y"]:
+        if autodetect:
             tempLines = []
             print("Possible lines to modify found:")
             with open(self.filePath, "r") as f:
@@ -326,6 +338,8 @@ class Rule(object):
                     self.lines.append(tempLines[i])
 
             self.save()
+            print()
+            print("Save successful.")
 
     def getIndeces(self, start, match, line):
         for i in range(start, len(line) - len(match)):
@@ -364,7 +378,7 @@ class Rule(object):
     def loadAll():
         rules = []
         for appName, values in Rule.config.items():
-            rule = Rule()
+            rule = Rule(values["filePath"], appName, values["mode"])
             rule.appName = appName
             rule.filePath = values["filePath"]
             rule.mode = values["mode"]
