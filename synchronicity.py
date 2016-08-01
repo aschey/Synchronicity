@@ -15,6 +15,7 @@ from sklearn import cluster
 from numpy import array
 from enum import Enum, unique
 from configobj import ConfigObj
+from argparse import ArgumentParser
 import random
 import subprocess
 import os
@@ -93,6 +94,67 @@ def printToScreen(numLights, numDarks):
     command = "./drawimage.sh lightcolors.ppm 60; ./drawimage.sh darkcolors.ppm 140; printf \"{0}\n\" {1}; printf \"{2}\n\" {3};".format(lightFormat, lightVals, darkFormat, darkVals)
     callCommand(command)
 
+def createTheme(args):
+    print("hi")
+    print(args)
+    return
+    #numLights = int(input("How many light colors do you want? "))
+    #numDarks = int(input("How many dark colors do you want? "))
+    #subprocess.call("clear", shell=True)
+    img = Image.open(filename)
+    img.thumbnail((200, 200))
+    w, h = img.size
+    #rules = Rule.load()
+    # get all rgb color values in the image and the amount of each
+    #points = getPoints(img)
+    tmpPoints = []
+    #for count, color in img.getcolors(w*h):
+    #    for i in range(count):
+    #        newcolor = []
+    #        for c in color:
+    #            newcolor.append(c)# + random.randint(-5,5))
+    #        tmpPoints.append(newcolor)
+    for count, color in img.getcolors(w * h):
+        tmpPoints.append(color)
+    lights, darks = separateColors(tmpPoints)
+    lightRgbs = createClusters(lights, numLights, "lightcolors.ppm")
+    darkRgbs = createClusters(darks, numDarks, "darkcolors.ppm")
+    allRgbs = lightRgbs + darkRgbs
+    printToScreen(numLights, numDarks)
+    #subprocess.call("feh lightcolors.ppm &", shell=True)
+    #subprocess.call("feh darkcolors.ppm &", shell=True)
+    backgroundIndex = int(input("Which color do you want to be the background? "))
+    foregroundIndex = int(input("Which color do you want to be the foreground? "))
+    cursorIndex = int(input("Which color do you want to be the cursor? "))
+    palette = (lightRgbs if backgroundIndex > numLights else darkRgbs)
+    #print("pick 16 colors")
+    otherCols = []
+    #for i in range(16):
+    #    otherCols.append(colors[int(input())])
+    background = allRgbs[backgroundIndex - 1]
+    foreground = allRgbs[foregroundIndex - 1]
+    cursor = allRgbs[cursorIndex - 1]
+    #colors.remove(background)
+    palette.remove(foreground)
+    palette.remove(cursor)
+    random.shuffle(palette)
+    Theme().create(palette, background, foreground, cursor)
+
+
+def parseArgs():
+    argParser = ArgumentParser()
+    subparsers = argParser.add_subparsers()
+
+    createParser = subparsers.add_parser("create")
+    createParser.add_argument("-f", required = True)
+    createParser.add_argument("-l", type = int, required = True)
+    createParser.add_argument("-d", type = int, required = True)
+    createParser.set_defaults(func = createTheme)
+
+    #argParser.add_argument("-l", required = True)
+    #argParser.add_argument("-d", required = True)
+    args = argParser.parse_args()
+    args.func(args)
 
 @unique
 class ColorRegex(Enum):
@@ -323,48 +385,9 @@ class Rule(object):
         return [(key, value) for key, value in Rule.config[appName].items() if key.startswith("line ")]
 
 def main(filename):
-    numLights = int(input("How many light colors do you want? "))
-    numDarks = int(input("How many dark colors do you want? "))
-    subprocess.call("clear", shell=True)
-    img = Image.open(filename)
-    img.thumbnail((200, 200))
-    w, h = img.size
-    #rules = Rule.load()
-    # get all rgb color values in the image and the amount of each
-    #points = getPoints(img)
-    tmpPoints = []
-    #for count, color in img.getcolors(w*h):
-    #    for i in range(count):
-    #        newcolor = []
-    #        for c in color:
-    #            newcolor.append(c)# + random.randint(-5,5))
-    #        tmpPoints.append(newcolor)
-    for count, color in img.getcolors(w * h):
-        tmpPoints.append(color)
-    lights, darks = separateColors(tmpPoints)
-    lightRgbs = createClusters(lights, numLights, "lightcolors.ppm")
-    darkRgbs = createClusters(darks, numDarks, "darkcolors.ppm")
-    allRgbs = lightRgbs + darkRgbs
-    printToScreen(numLights, numDarks)
-    #subprocess.call("feh lightcolors.ppm &", shell=True)
-    #subprocess.call("feh darkcolors.ppm &", shell=True)
-    backgroundIndex = int(input("Which color do you want to be the background? "))
-    foregroundIndex = int(input("Which color do you want to be the foreground? "))
-    cursorIndex = int(input("Which color do you want to be the cursor? "))
-    palette = (lightRgbs if backgroundIndex > numLights else darkRgbs)
-    #print("pick 16 colors")
-    otherCols = []
-    #for i in range(16):
-    #    otherCols.append(colors[int(input())])
-    background = allRgbs[backgroundIndex - 1]
-    foreground = allRgbs[foregroundIndex - 1]
-    cursor = allRgbs[cursorIndex - 1]
-    #colors.remove(background)
-    palette.remove(foreground)
-    palette.remove(cursor)
-    random.shuffle(palette)
-    Theme().create(palette, background, foreground, cursor)
+    parseArgs()
 
+    
 
                     
 
