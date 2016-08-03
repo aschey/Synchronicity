@@ -1,11 +1,11 @@
 #TODO:
     # enforce min distance between colors
-    # auto-detect which config lines to edit
     # make backup system
     # allow user to choose config dir
     # configurable backup history size
-    # allow choosing 256, 16 or hex colors
     # random theme on startup
+    # warn about backup when changing theme
+    # allow user to choose backgrounds
     
 from PIL import Image
 from collections import namedtuple
@@ -105,6 +105,8 @@ def printToScreen(numLights, numDarks):
 def createTheme(args):
     numLights = args.l
     numDarks = args.d
+    filename = args.f
+    name = args.n
     subprocess.call("clear", shell=True)
     img = Image.open(filename)
     img.thumbnail((200, 200))
@@ -141,7 +143,7 @@ def createTheme(args):
     palette.remove(foreground)
     palette.remove(cursor)
     random.shuffle(palette)
-    Theme(palette, background, foreground, cursor)
+    Theme().create(name, palette, background, foreground, cursor)
 
 def backup(args):
     sourceDestPairs = [(rule.filePath, getFilePath(rule.appName + ".backup")) for rule in Rules]
@@ -158,11 +160,17 @@ def revert(args):
     sourceDestPairs = [(getFilePath(rule.appName + ".backup"), rule.filePath) for rule in Rules]
     copyFiles(sourceDestPairs)
 
+def rmRule(args):
+    appName = args.n
+    del Rule.config[appName]
+    Rule.config.write()
+
 def parseArgs():
     argParser = ArgumentParser()
     subparsers = argParser.add_subparsers()
 
     themeParser = subparsers.add_parser("theme")
+    themeParser.add_argument("-n", required = True)
     themeParser.add_argument("-f", required = True)
     themeParser.add_argument("-l", type = int, required = True)
     themeParser.add_argument("-d", type = int, required = True)
@@ -185,6 +193,10 @@ def parseArgs():
     revertParser = subparsers.add_parser("revert")
     revertParser.set_defaults(func = revert)
 
+    rmRuleParser = subparsers.add_parser("rm-rule")
+    rmRuleParser.add_argument("n")
+    rmRuleParser.set_defaults(func = rmRule)
+
     args = argParser.parse_args()
     if hasattr(args, "func"):
         args.func(args)
@@ -193,9 +205,9 @@ def parseArgs():
 
 @unique
 class ColorRegex(Enum):
-    hex = "\#\w{6}"
-    rgb = "\d{1,3} \d{1,3} \d{1,3}"
-    decimal = "\d{1,3}"
+    hex = "(?:^|[\s=:])[\"']?(\#\w{6})[\"']?(?!\S)"
+    rgb = "(?:^|[\s=:])[\"']?(\d{1,3} \d{1,3} \d{1,3})[\"']?(?!\S)"
+    decimal = "(?:^|[\s=:])[\"']?(\d{1,3})[\"']?(?!\S)"
 
 class Line(object): #= namedtuple("Line", ("lineNumber", "editIndeces", "useCursorColor", "useBackgroundColor", "useForegroundColor"))
     def __init__(self, lineNumber, useCursorColor = False, useBackgroundColor = False, useForegroundColor = False):
@@ -215,7 +227,7 @@ class Theme(object):
         self.cursor = ""
         self.colorIndex = 0
 
-        self.create(newColors, background, foreground, cursor)
+        #self.create(newColors, background, foreground, cursor)
 
     #def save():
     #    self.name = input("Enter the theme name: ")
@@ -230,7 +242,7 @@ class Theme(object):
     @staticmethod
     def load(name):
         sourceDestPairs = [(getFilePath(name, rule.appName), rule.filePath) for rule in Rules]
-        print(Rules)
+        
         copyFiles(sourceDestPairs)
 
         #theme = Theme()
@@ -287,12 +299,12 @@ class Theme(object):
                 
                     
 
-    def create(self, newColors, background, foreground, cursor):
+    def create(self, name, newColors, background, foreground, cursor):
         self.palette = newColors
         self.background = background
         self.foreground = foreground
         self.cursor = cursor
-        self.name = input("Enter the theme name: ")
+        self.name = name
         callCommand("mkdir " + getFilePath(self.name))
         self.updateConfigFiles()
 
