@@ -87,6 +87,8 @@ def getNumbersString(start, end):
     return " ".join([str(i) for i in range(start, end)])
 
 def lineStringToList(lineString):
+    if len(lineString) == 0:
+        return []
     modifyIndeces = []
     splitLine = lineString.split(",")
     for lineNumber in splitLine:
@@ -196,7 +198,7 @@ def parseArgs():
     ruleParser.add_argument("-f", required = True)
     ruleParser.add_argument("-a", required = True)
     ruleParser.add_argument("-i", choices = ["hex", "rgb", "numeric"], default = "hex")
-    ruleParser.add_argument("-d", choices = ["dark", "light"], default = "dark")
+    ruleParser.add_argument("-d", choices = ["dark", "light"], default = "light")
     ruleParser.add_argument("--no-autodetect", action = "store_true")
     ruleParser.set_defaults(func = createRule)
 
@@ -222,9 +224,9 @@ def parseArgs():
 
 @unique
 class ColorRegex(Enum):
-    hex = "(?:^|[\s=:])[\"']?(\#\w{6})[\"']?(?!\S)"
-    rgb = "(?:^|[\s=:])[\"']?(\d{1,3} \d{1,3} \d{1,3})[\"']?(?!\S)"
-    decimal = "(?:^|[\s=:])[\"']?(\d{1,3})[\"']?(?!\S)"
+    hex = "(?:^|\W)(\#[a-fA-F0-9]{6})(?!\w)"
+    rgb = "(?:^|\W)(\#\d{1,3} \d{1,3} \d{1,3})(?!\w)"
+    decimal = "(?:^|\W)(\#d{1,3})(?!\w)"
 
 @unique
 class ColorType(Enum):
@@ -383,9 +385,7 @@ class Rule(object):
             pass
             #TODO: function to get manual lines
         modifyLines = input("Enter which lines you wish to modify. Enter nothing to modify all lines. Example: 2-5,8,10: ").replace(" ", "")
-        nonDefaultColorType = (ColorType.light if defaultColorType == ColorType.dark else ColorType.dark)
-        nonDefaultLines = input("Enter which lines should use " + nonDefaultColorType.name + " colors: ")
-        modifyAll = (True if len(linesToModify) == 0 else False)
+        modifyAll = (True if len(modifyLines) == 0 else False)
         if modifyAll:
             self.lines = linesFound
         else:
@@ -406,9 +406,11 @@ class Rule(object):
                 if i in modifyList:
                     self.lines.append(linesFound[i])
 
+        nonDefaultColorType = (ColorType.light if defaultColorType == ColorType.dark else ColorType.dark)
+        nonDefaultLines = input("Enter which lines should use " + nonDefaultColorType.name + " colors: ").strip()
         nonDefaultList = lineStringToList(nonDefaultLines)
         for lineNumber in nonDefaultList:
-            self.lines[lineNumber - 1].color = nonDefaultColorType
+            self.lines[lineNumber - 1].colorType = nonDefaultColorType
         self.save()
         print()
         print("Save successful.")
@@ -435,13 +437,14 @@ class Rule(object):
             configRule[lineHeader] = {}
             lineConfig = configRule[lineHeader]
             lineConfig["lineNumber"] = line.lineNumber
-            lineConfig["color"] = line.color
             if line.useCursorColor:
                 lineConfig["cursor"] = True
-            if line.useBackgroundColor:
+            elif line.useBackgroundColor:
                 lineConfig["background"] = True
-            if line.useForegroundColor:
+            elif line.useForegroundColor:
                 lineConfig["foreground"] = True
+            else:
+                lineConfig["colorType"] = line.colorType.name
 
             lineConfig["substringsToEdit"] = line.editIndeces
 
@@ -457,7 +460,7 @@ class Rule(object):
             rule.mode = values["mode"]
 
             for key, lineValues in Rule.getLineNumberItems(appName):
-                line = Line(lineNumber = lineValues["lineNumber"], color = lineValues["color"])
+                line = Line(lineNumber = lineValues["lineNumber"], colorType = lineValues.get("colorType", None))
                 line.useCursorColor = lineValues.get("cursor", False)
                 line.useBackgroundColor = lineValues.get("background", False)
                 line.useForegroundColor = lineValues.get("foreground", False)
