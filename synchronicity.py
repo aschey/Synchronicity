@@ -36,7 +36,7 @@ def createClusters(points, n, filename):
 
 # convert the decimal color values to a hex string
 def rgbToHex(rgb):
-    return "#" + "".join("{0:02x}".format(val) for val in rgb)
+    return "#" + "".join("{0:02x}".format(val) for val in rgb).upper()
 
 def separateColors(rgbs):
     lights = []
@@ -85,6 +85,21 @@ def buildFormatString(numColors):
 
 def getNumbersString(start, end):
     return " ".join([str(i) for i in range(start, end)])
+
+def lineStringToList(lineString):
+    modifyIndeces = []
+    splitLine = lineString.split(",")
+    for lineNumber in splitLine:
+        try:
+            lineNumber = int(lineNumber)
+            modifyIndeces.append(lineNumber)
+        except ValueError:
+            start = int(lineNumber[0])
+            end = int(lineNumber[2])
+            for i in range(start, end + 1):
+                modifyIndeces.append(i)
+    return sorted(modifyIndeces)
+
 
 def copyFiles(sourceDestPairs):
     command = ""
@@ -143,7 +158,7 @@ def createTheme(args):
     palette.remove(foreground)
     palette.remove(cursor)
     random.shuffle(palette)
-    Theme().create(name, palette, background, foreground, cursor)
+    Theme(lightRgbs, darkRgbs, foreground, background, cursor).create(name)
 
 def backup(args):
     sourceDestPairs = [(rule.filePath, getFilePath(rule.appName + ".backup")) for rule in Rules]
@@ -151,7 +166,8 @@ def backup(args):
 
 def createRule(args):
     autodetect = not args.no_autodetect
-    Rule(args.f, args.a, args.i).create(autodetect)
+    defaultColorType = ColorType[args.d]
+    Rule(args.f, args.a, args.i).create(autodetect, defaultColorType)
 
 def loadTheme(args):
     Theme.load(args.n)
@@ -179,7 +195,8 @@ def parseArgs():
     ruleParser = subparsers.add_parser("rule")
     ruleParser.add_argument("-f", required = True)
     ruleParser.add_argument("-a", required = True)
-    ruleParser.add_argument("-i", choices = ["hex", "rgb", "numeric"], required = True)
+    ruleParser.add_argument("-i", choices = ["hex", "rgb", "numeric"], default = "hex")
+    ruleParser.add_argument("-d", choices = ["dark", "light"], default = "dark")
     ruleParser.add_argument("--no-autodetect", action = "store_true")
     ruleParser.set_defaults(func = createRule)
 
@@ -209,23 +226,39 @@ class ColorRegex(Enum):
     rgb = "(?:^|[\s=:])[\"']?(\d{1,3} \d{1,3} \d{1,3})[\"']?(?!\S)"
     decimal = "(?:^|[\s=:])[\"']?(\d{1,3})[\"']?(?!\S)"
 
+@unique
+class ColorType(Enum):
+    dark = "dark"
+    light = "light"
+
+class ColorList(object):
+    def __init__(self):
+        self.index = 0
+        self.colors = []
+
+    def next(self):
+        currentColor = self.colors[self.index]
+        self.index += 1
+        if self.index == len(self.colors):
+            self.index = 0
+        return currentColor
+
 class Line(object): #= namedtuple("Line", ("lineNumber", "editIndeces", "useCursorColor", "useBackgroundColor", "useForegroundColor"))
-    def __init__(self, lineNumber, useCursorColor = False, useBackgroundColor = False, useForegroundColor = False):
+    def __init__(self, lineNumber, colorType, useCursorColor = False, useBackgroundColor = False, useForegroundColor = False):
         self.lineNumber = lineNumber
+        self.colorType = colorType
         self.editIndeces = []
         self.useCursorColor = useCursorColor
         self.useBackgroundColor = useBackgroundColor
         self.useForegroundColor = useForegroundColor
 
 class Theme(object):
-    def __init__(self):
-        self.name = ""
-        self.files = {}
-        self.palette = []
-        self.foreground = ""
-        self.background = ""
-        self.cursor = ""
-        self.colorIndex = 0
+    def __init__(self, lightColors, darkColors, foreground, background, cursor):
+        self.lightColors = ColorList(lightColors)
+        self.darkColors = ColorList(darkColors)
+        self.foreground = foreground
+        self.background = background
+        self.cursor = cursor
 
         #self.create(newColors, background, foreground, cursor)
 
@@ -269,15 +302,17 @@ class Theme(object):
     def nextColor(self, line):
         if line.useBackgroundColor:
             return self.background
+
         if line.useForegroundColor:
             return self.foreground
+
         if line.useCursorColor:
             return self.cursor
-        color = self.palette[self.colorIndex]
-        self.colorIndex += 1
-        if self.colorIndex == len(self.palette):
-            self.colorIndex = 0
-        return color
+
+        if line.colorType == ColorType.light:
+            return self.lightColors.next()
+
+        return self.darkColors.next()
 
 
     def updateConfigFiles(self):
@@ -299,13 +334,8 @@ class Theme(object):
                 
                     
 
-    def create(self, name, newColors, background, foreground, cursor):
-        self.palette = newColors
-        self.background = background
-        self.foreground = foreground
-        self.cursor = cursor
-        self.name = name
-        callCommand("mkdir " + getFilePath(self.name))
+    def create(self, name):
+        callCommand("mkdir " + getFilePath(name))
         self.updateConfigFiles()
 
     def changeLine(self, line, start, end, newValue):
@@ -320,7 +350,7 @@ class Rule(object):
         self.mode = ColorRegex[inputFormat]
         self.lines = []
 
-    def create(self, autodetect):
+    def create(self, autodetect, defaultColorType):
         lines = []
         count = 1
         lineNo = 0
@@ -328,14 +358,14 @@ class Rule(object):
         #self.appName = appName
         #self.mode = ColorRegex[inputFormat]
         search = re.compile(self.mode.value)
+        linesFound = []
         if autodetect:
-            tempLines = []
             print("Possible lines to modify found:")
             with open(self.filePath, "r") as f:
                 for line in f:
                     matches = search.findall(line)
                     if len(matches) > 0:
-                        textLine = Line(lineNumber = lineNo, 
+                        textLine = Line(lineNumber = lineNo, colorType = defaultColorType,
                                 useCursorColor = (True if "cursor" in line else False),
                                 useBackgroundColor = (True if "background" in line else False),
                                 useForegroundColor = (True if "foreground" in line else False))
@@ -347,30 +377,41 @@ class Rule(object):
                             indeces = self.getIndeces(start, match, line)
                             textLine.editIndeces.append(indeces)
                             start = indeces[1]
-                        tempLines.append(textLine)
+                        linesFound.append(textLine)
                     lineNo += 1
-            linesToModify = input("Enter which lines you wish to modify. Enter nothing to modify all lines. Example: 2-5,8,10: ").replace(" ", "")
-            modifyList = linesToModify.split(",")
-            modifyAll = (True if len(linesToModify) == 0 else False)
-            modifyIndeces = []
-            if not modifyAll:
-                for lineNumber in modifyList:
-                    try:
-                        lineNumber = int(lineNumber)
-                        modifyIndeces.append(lineNumber)
-                    except ValueError:
-                        start = int(lineNumber[0])
-                        end = int(lineNumber[2])
-                        for i in range(start, end + 1):
-                            modifyIndeces.append(i)
-            modifyList = sorted(modifyIndeces)
-            for i in range(len(tempLines)):
-                if modifyAll or i in modifyList:
-                    self.lines.append(tempLines[i])
+        else:
+            pass
+            #TODO: function to get manual lines
+        modifyLines = input("Enter which lines you wish to modify. Enter nothing to modify all lines. Example: 2-5,8,10: ").replace(" ", "")
+        nonDefaultColorType = (ColorType.light if defaultColorType == ColorType.dark else ColorType.dark)
+        nonDefaultLines = input("Enter which lines should use " + nonDefaultColorType.name + " colors: ")
+        modifyAll = (True if len(linesToModify) == 0 else False)
+        if modifyAll:
+            self.lines = linesFound
+        else:
+            modifyList = lineStringToList(linesToModify)
+            #if not modifyAll:
+                
+            #    for lineNumber in modifyList:
+            #        try:
+            #            lineNumber = int(lineNumber)
+            #            modifyIndeces.append(lineNumber)
+            #        except ValueError:
+            #            start = int(lineNumber[0])
+            #            end = int(lineNumber[2])
+            #            for i in range(start, end + 1):
+            #                modifyIndeces.append(i)
+            #modifyList = sorted(modifyIndeces)
+            for i in range(len(linesFound)):
+                if i in modifyList:
+                    self.lines.append(linesFound[i])
 
-            self.save()
-            print()
-            print("Save successful.")
+        nonDefaultList = lineStringToList(nonDefaultLines)
+        for lineNumber in nonDefaultList:
+            self.lines[lineNumber - 1].color = nonDefaultColorType
+        self.save()
+        print()
+        print("Save successful.")
 
     def getIndeces(self, start, match, line):
         for i in range(start, len(line) - len(match)):
@@ -394,6 +435,7 @@ class Rule(object):
             configRule[lineHeader] = {}
             lineConfig = configRule[lineHeader]
             lineConfig["lineNumber"] = line.lineNumber
+            lineConfig["color"] = line.color
             if line.useCursorColor:
                 lineConfig["cursor"] = True
             if line.useBackgroundColor:
@@ -415,7 +457,7 @@ class Rule(object):
             rule.mode = values["mode"]
 
             for key, lineValues in Rule.getLineNumberItems(appName):
-                line = Line(lineNumber = lineValues["lineNumber"])
+                line = Line(lineNumber = lineValues["lineNumber"], color = lineValues["color"])
                 line.useCursorColor = lineValues.get("cursor", False)
                 line.useBackgroundColor = lineValues.get("background", False)
                 line.useForegroundColor = lineValues.get("foreground", False)
