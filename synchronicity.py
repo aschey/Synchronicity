@@ -11,7 +11,7 @@
 from PIL import Image
 from collections import namedtuple
 from math import sqrt
-from sys import argv
+from sys import argv, exit
 from sklearn import cluster
 from numpy import array
 from enum import Enum, unique
@@ -56,7 +56,10 @@ def isDark(rgb):
     return ((rgb[0] * 299) + (rgb[1] * 587) + (rgb[2] * 114)) / 1000 <= 25
 
 def callCommand(command):
-    subprocess.call(command, shell = True)
+    retCode = subprocess.call(command, shell = True)
+    if not retCode == 0:
+        print("command {0} failed with error code {1}".format(command, retCode))
+        exit()
 
 def getFilePath(*args):
     pathElements = [CONFIG_DIR] + list(args)
@@ -170,7 +173,7 @@ def backup(args):
 def createRule(args):
     autodetect = not args.no_autodetect
     defaultColorType = ColorType[args.d]
-    Rule(args.f, args.a, args.i).create(autodetect, defaultColorType)
+    Rule(args.f, args.a, args.i).create(autodetect, args.manual_background, args.manual_foreground, args.manual_cursor, defaultColorType)
 
 def loadTheme(args):
     Theme.load(args.n)
@@ -179,10 +182,31 @@ def revert(args):
     sourceDestPairs = [(getFilePath(rule.appName + ".backup"), rule.filePath) for rule in Rules]
     copyFiles(sourceDestPairs)
 
+def saveCurrent(args):
+    themeName = args.n
+    themePath = getFilePath(themeName)
+    sourceDestPairs = [(rule.filePath, getFilePath(themeName, rule.appName)) for rule in Rules]
+    if not os.path.isdir(themePath):
+        callCommand("mkdir " + themePath)
+
+    copyFiles(sourceDestPairs)
+
 def rmRule(args):
     appName = args.n
     del Rule.config[appName]
     Rule.config.write()
+
+def rmTheme(args):
+    themeName = args.n
+    themePath = getFilePath(themeName)
+    callCommand("rm -r " + themePath)
+
+def reconfigure(args):
+    themeName = args.t
+    appName = args.a
+    theme = Theme.fromConfig(themeName)
+    rule = Rule.load(appName)
+    theme.updateConfigFile(themeName, rule)
 
 def parseArgs():
     argParser = ArgumentParser()
@@ -201,6 +225,9 @@ def parseArgs():
     ruleParser.add_argument("-i", choices = ["hex", "rgb", "numeric"], default = "hex")
     ruleParser.add_argument("-d", choices = ["dark", "light"], default = "light")
     ruleParser.add_argument("--no-autodetect", action = "store_true")
+    ruleParser.add_argument("--manual-background", action = "store_true")
+    ruleParser.add_argument("--manual-foreground", action = "store_true")
+    ruleParser.add_argument("--manual-cursor", action = "store_true")
     ruleParser.set_defaults(func = createRule)
 
     backupParser = subparsers.add_parser("backup")
@@ -217,11 +244,27 @@ def parseArgs():
     rmRuleParser.add_argument("n")
     rmRuleParser.set_defaults(func = rmRule)
 
+    rmThemeParser = subparsers.add_parser("rm-theme")
+    rmThemeParser.add_argument("n")
+    rmThemeParser.set_defaults(func = rmTheme)
+
+    saveCurrentParser = subparsers.add_parser("save-current")
+    saveCurrentParser.add_argument("n")
+    saveCurrentParser.set_defaults(func = saveCurrent)
+
+    reconfigureParser = subparsers.add_parser("reconfigure")
+    reconfigureParser.add_argument("a")
+    reconfigureParser.add_argument("-t")
+    reconfigureParser.set_defaults(func = reconfigure)
+
     args = argParser.parse_args()
     if hasattr(args, "func"):
         args.func(args)
     else:
         argParser.parse_args(["-h"])
+    
+    print()
+    print("Success.")
 
 LineMatch = namedtuple("LineMatch", ("text", "lineNo", "colors"))
 
@@ -277,34 +320,21 @@ class Theme(object):
         self.background = background
         self.cursor = cursor
 
-        #self.create(newColors, background, foreground, cursor)
+    @classmethod
+    def fromConfig(cls, name):
+        colorConfig = cls.getColorConfig(name)
+        lightColors = colorConfig["lightColors"]
+        darkColors = colorConfig["darkColors"]
+        foreground = colorConfig["foreground"]
+        background = colorConfig["background"]
+        cursor = colorConfig["cursor"]
+        return cls(lightColors, darkColors, foreground, background, cursor)
 
     @staticmethod
     def load(name):
         sourceDestPairs = [(getFilePath(name, rule.appName), rule.filePath) for rule in Rules]
         
         copyFiles(sourceDestPairs)
-
-        #theme = Theme()
-        #theme.name = filename[:-6]
-        #addLines = False
-        #with open(filename, "r") as f:
-        #    for line in f:
-        #        if line[:4] == "name":
-        #            appName = line[7:]
-        #            theme.files[appName] = []
-        #            addLines = True
-        #        elif addLines:
-        #            theme.files[appName].append(line#)
-        #        
-        #        if line == "[/Application#]":
-        #            addLines = False
-
-        #return theme
-
-    #def backupConfig(self, rule):
-    #    command = "cp {0} {1}".format(rule.filePath, getFilePath(self.name, rule.appName + ".backup"))
-    #    callCommand(command)
 
     def nextColor(self, line, colorString):
         if line.useBackgroundColor:
@@ -321,25 +351,40 @@ class Theme(object):
 
         return self.darkColors.next()
 
+    def updateConfigFile(self, name, rule):
+        colorIndex = 0
+        with open(rule.filePath, "r") as f:
+            configLines = [line for line in f]
+        for line in rule.lines:
+            editLine = configLines[line.lineNumber]
+            newLine = editLine
+            for colorString in line.colorStrings:
+                newLine = self.changeLine(newLine, colorString.indeces, self.nextColor(line, colorString))
+            configLines[line.lineNumber] = newLine
+        print(configLines)
+        writeArrayToFile(configLines, getFilePath(name, rule.appName))
 
     def updateConfigFiles(self, name):
         for rule in Rules:
-            #self.backupConfig(rule)
-            colorIndex = 0
-            with open(rule.filePath, "r") as f:
-                configLines = [line for line in f]
-            for line in rule.lines:
-                editLine = configLines[line.lineNumber]
-                newLine = editLine
-                for colorString in line.colorStrings:
-                    newLine = self.changeLine(newLine, colorString.indeces, self.nextColor(line, colorString))
-                configLines[line.lineNumber] = newLine
+            self.updateConfigFile(name, rule)
+    
+    @staticmethod
+    def getColorConfig(name):
+        return ConfigObj(getFilePath(name, "colors"), indent_type = "\t", unrepr = True)
 
-            writeArrayToFile(configLines, getFilePath(name, rule.appName))
-                
+    def writeColorConfig(self, name):
+        colorConfig = Theme.getColorConfig(name)
+        colorConfig["lightColors"] = self.lightColors.colors
+        colorConfig["darkColors"] = self.darkColors.colors
+        colorConfig["foreground"] = self.foreground
+        colorConfig["background"] = self.background
+        colorConfig["cursor"] = self.cursor
+        colorConfig.write()
+ 
     def create(self, name):
         callCommand("mkdir " + getFilePath(name))
         self.updateConfigFiles(name)
+        self.writeColorConfig(name)
 
     def changeLine(self, line, indeces, newValue):
         start = indeces[0]
@@ -355,12 +400,9 @@ class Rule(object):
         self.mode = ColorRegex[inputFormat]
         self.lines = []
 
-    def create(self, autodetect, defaultColorType):
+    def create(self, autodetect, manualBg, manualFg, manualCursor, defaultColorType):
         lines = []
         lineNo = 0
-        #self.filePath = os.path.expanduser(filePath.strip())
-        #self.appName = appName
-        #self.mode = ColorRegex[inputFormat]
         search = re.compile(self.mode.value)
         linesFound = []
         lines = []
@@ -371,15 +413,14 @@ class Rule(object):
                     matches = search.findall(line)
                     if len(matches) > 0:
                         textLine = Line(lineNumber = lineNo,
-                                useCursorColor = (True if "cursor" in line else False),
-                                useBackgroundColor = (True if "background" in line else False),
-                                useForegroundColor = (True if "foreground" in line else False))
+                                useCursorColor = (True if manualCursor and "cursor" in line else False),
+                                useBackgroundColor = (True if manualBg and "background" in line else False),
+                                useForegroundColor = (True if manualFg and "foreground" in line else False))
                         lines.append(LineMatch(line.strip(), lineNo, matches))
                         start = 0
                         for match in matches:
                             indeces = self.getIndeces(start, match, line)
                             textLine.colorStrings.append(ColorString(indeces, match, defaultColorType))
-                            #textLine.editIndeces.append(indeces)
                             start = indeces[1]
                         linesFound.append(textLine)
                     lineNo += 1
@@ -405,8 +446,6 @@ class Rule(object):
         for lineNumber in nonDefaultList:
             colorList[lineNumber - 1].colorType = nonDefaultColorType
         self.save()
-        print()
-        print("Save successful.")
 
     @staticmethod
     def serializeColorStrings(colorStrings):
@@ -461,65 +500,40 @@ class Rule(object):
             lineConfig["substringsToEdit"] = Rule.serializeColorStrings(line.colorStrings)
 
         Rule.config.write()
-        
+
     @staticmethod
     def loadAll():
         rules = []
         for appName, values in Rule.config.items():
-            rule = Rule(values["filePath"], appName, values["mode"])
-            rule.appName = appName
-            rule.filePath = values["filePath"]
-            rule.mode = values["mode"]
-
-            for key, lineValues in Rule.getLineNumberItems(appName):
-                line = Line(lineNumber = lineValues["lineNumber"])
-                line.useCursorColor = lineValues.get("cursor", False)
-                line.useBackgroundColor = lineValues.get("background", False)
-                line.useForegroundColor = lineValues.get("foreground", False)
-                line.colorStrings = Rule.deserializeColorStrings(lineValues["substringsToEdit"])
-                rule.lines.append(line) 
-            rules.append(rule)
-
+            rules.append(Rule.load(appName))
         return rules
+        
+    @staticmethod
+    def load(appName):
+        values = Rule.config[appName]
+        rule = Rule(values["filePath"], appName, values["mode"])
+        rule.appName = appName
+        rule.filePath = values["filePath"]
+        rule.mode = values["mode"]
+
+        for key, lineValues in Rule.getLineNumberItems(appName):
+            line = Line(lineNumber = lineValues["lineNumber"])
+            line.useCursorColor = lineValues.get("cursor", False)
+            line.useBackgroundColor = lineValues.get("background", False)
+            line.useForegroundColor = lineValues.get("foreground", False)
+            line.colorStrings = Rule.deserializeColorStrings(lineValues["substringsToEdit"])
+            rule.lines.append(line) 
+
+        return rule
 
     @staticmethod
     def getLineNumberItems(appName):
         return [(key, value) for key, value in Rule.config[appName].items() if key.startswith("line ")]
 
-def main(filename):
+def main():
     global Rules
     Rules = Rule.loadAll()
     parseArgs()
-
-    
-
-                    
-
-#def modifyTerminatorConfig(tconfigLines, colors, background, foreground, cursor):
-#    configColors = ":".join(colors)
-#    modifiedConfig = []
-#    for line in tconfigLines:
-#        if line[4:11] == "palette":
-#            modifiedConfig.append(line[:14] + '"' + configColors + '"\n')
-#        elif line[4:16] == "cursor_color":
-#            modifiedConfig.append(line[:18] + '"' + cursor + '"\n')
-#        elif line[4:20] == "foreground_color":
-#            modifiedConfig.append(line[:23] + '"' + foreground + '"\n')
-#        elif line[4:20] == "background_color":
-#            modifiedConfig.append(line[:23] + '"' + background + '"\n')
-#        else:
-#            modifiedConfig.append(line)
-#
-#    return modifiedConfig
-            
-
-#def readTerminatorConfig():
-#    tconfigLines = []
-#    with open("/home/aschey/.config/terminator/config", "r") as f:
-#        for line in f:
-#            tconfigLines.append(line)
-#    return tconfigLines
-
 
 def getPoints(img):
     points = []
@@ -572,5 +586,4 @@ def kmeans(points, k, minDiff):
     return clusters
 
 if __name__ == "__main__":
-    main('/home/aschey/Pictures/wallpapers/deja_entendu.jpeg')
-    #Rule().create()
+    main()
