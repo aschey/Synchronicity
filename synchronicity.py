@@ -1,12 +1,13 @@
+#! /usr/bin/env python
+
 #TODO:
     # enforce min distance between colors
-    # make backup system
     # allow user to choose config dir
     # configurable backup history size
     # random theme on startup
     # warn about backup when changing theme
     # allow user to choose backgrounds
-    # save current config
+    # warn when any files have been changed
     
 from PIL import Image
 from collections import namedtuple
@@ -25,13 +26,12 @@ import re
 CONFIG_DIR = os.path.expanduser("~/.synchronicity")
 CONFIG_FILE_PATH = CONFIG_DIR + "/rules.ini"
 
-global Rules
-
 def createClusters(points, n, filename):
-    kmeans = cluster.KMeans(n_clusters = n)
-    kmeans.fit(points)
-    clusters = [c[:3] for c in kmeans.cluster_centers_]
-    rgbs = [list(map(int, c)) for c in clusters]
+    #kmeans = cluster.KMeans(n_clusters = n)
+    #kmeans.fit(points)
+    #clusters = [c[:3] for c in kmeans.cluster_centers_]
+    rgbs = [list(map(int, cluster.center.coords)) for cluster in kmeans(points, n, 50)]
+    #rgbs = [list(map(int, c)) for c in clusters]
     writeToPPM(rgbs, filename, n)
     return list(map(rgbToHex, rgbs))
 
@@ -128,23 +128,15 @@ def createTheme(args):
     numDarks = args.d
     filename = args.f
     name = args.n
-    subprocess.call("clear", shell=True)
+    callCommand("clear")
     img = Image.open(filename)
-    img.thumbnail((200, 200))
+    #img.thumbnail((200, 200))
     w, h = img.size
-    #rules = Rule.load()
-    # get all rgb color values in the image and the amount of each
-    #points = getPoints(img)
     tmpPoints = []
-    #for count, color in img.getcolors(w*h):
-    #    for i in range(count):
-    #        newcolor = []
-    #        for c in color:
-    #            newcolor.append(c)# + random.randint(-5,5))
-    #        tmpPoints.append(newcolor)
     for count, color in img.getcolors(w * h):
         tmpPoints.append(color)
-    lights, darks = separateColors(tmpPoints)
+    #lights, darks = separateColors(tmpPoints)
+    lights, darks = getPoints(img)
     lightRgbs = createClusters(lights, numLights, "lightcolors.ppm")
     darkRgbs = createClusters(darks, numDarks, "darkcolors.ppm")
     allRgbs = lightRgbs + darkRgbs
@@ -164,7 +156,7 @@ def createTheme(args):
     palette.remove(foreground)
     palette.remove(cursor)
     random.shuffle(palette)
-    Theme(lightRgbs, darkRgbs, foreground, background, cursor).create(name)
+    Theme(filename, lightRgbs, darkRgbs, foreground, background, cursor).create(name)
 
 def backup(args):
     sourceDestPairs = [(rule.filePath, getFilePath(rule.appName + ".backup")) for rule in Rules]
@@ -206,7 +198,15 @@ def reconfigure(args):
     appName = args.a
     theme = Theme.fromConfig(themeName)
     rule = Rule.load(appName)
+    rule.shuffleColors()
     theme.updateConfigFile(themeName, rule)
+
+def recreate(args):
+    themeName = args.n
+
+def startup(args):
+    themeName = args.n
+    Theme.loadWallpaper(themeName)
 
 def parseArgs():
     argParser = ArgumentParser()
@@ -234,7 +234,7 @@ def parseArgs():
     backupParser.set_defaults(func = backup)
 
     loadParser = subparsers.add_parser("load")
-    loadParser.add_argument("-n", required = True)
+    loadParser.add_argument("n")
     loadParser.set_defaults(func = loadTheme)
 
     revertParser = subparsers.add_parser("revert")
@@ -254,8 +254,16 @@ def parseArgs():
 
     reconfigureParser = subparsers.add_parser("reconfigure")
     reconfigureParser.add_argument("a")
-    reconfigureParser.add_argument("-t")
+    reconfigureParser.add_argument("-t", required = True)
     reconfigureParser.set_defaults(func = reconfigure)
+
+    recreateParser = subparsers.add_parser("recreate")
+    recreateParser.add_argument("n")
+    recreateParser.set_defaults(func = recreate)
+
+    startupParser = subparsers.add_parser("startup")
+    startupParser.add_argument("n")
+    startupParser.set_defaults(func = startup)
 
     args = argParser.parse_args()
     if hasattr(args, "func"):
@@ -313,7 +321,8 @@ class ColorString(object):
         return ColorString(colorStringDict["indeces"], colorStringDict["color"], ColorType[colorStringDict["colorType"]])
 
 class Theme(object):
-    def __init__(self, lightColors, darkColors, foreground, background, cursor):
+    def __init__(self, wallpaperFile, lightColors, darkColors, foreground, background, cursor):
+        self.wallpaperFile = wallpaperFile
         self.lightColors = ColorList(lightColors)
         self.darkColors = ColorList(darkColors)
         self.foreground = foreground
@@ -322,18 +331,25 @@ class Theme(object):
 
     @classmethod
     def fromConfig(cls, name):
-        colorConfig = cls.getColorConfig(name)
-        lightColors = colorConfig["lightColors"]
-        darkColors = colorConfig["darkColors"]
-        foreground = colorConfig["foreground"]
-        background = colorConfig["background"]
-        cursor = colorConfig["cursor"]
-        return cls(lightColors, darkColors, foreground, background, cursor)
+        themeConfig = cls.getThemeConfig(name)
+        wallpaperFile = themeConfig["wallpaperFile"]
+        lightColors = themeConfig["lightColors"]
+        darkColors = themeConfig["darkColors"]
+        foreground = themeConfig["foreground"]
+        background = themeConfig["background"]
+        cursor = themeConfig["cursor"]
+        return cls(wallpaperFile, lightColors, darkColors, foreground, background, cursor)
+
+    @staticmethod
+    def loadWallpaper(themeName):
+        themeConfig = ConfigObj(getFilePath(themeName, "themeConfig.ini"), unrepr = True)
+        command = Config["wallpaperCmd"].strip() + " " + themeConfig["wallpaperFile"]
+        callCommand(command)
 
     @staticmethod
     def load(name):
+        Theme.loadWallpaper(name)
         sourceDestPairs = [(getFilePath(name, rule.appName), rule.filePath) for rule in Rules]
-        
         copyFiles(sourceDestPairs)
 
     def nextColor(self, line, colorString):
@@ -351,6 +367,10 @@ class Theme(object):
 
         return self.darkColors.next()
 
+    def shuffleColors(self):
+        random.shuffle(lightColors)
+        random.shuffle(darkColors)
+
     def updateConfigFile(self, name, rule):
         colorIndex = 0
         with open(rule.filePath, "r") as f:
@@ -361,7 +381,6 @@ class Theme(object):
             for colorString in line.colorStrings:
                 newLine = self.changeLine(newLine, colorString.indeces, self.nextColor(line, colorString))
             configLines[line.lineNumber] = newLine
-        print(configLines)
         writeArrayToFile(configLines, getFilePath(name, rule.appName))
 
     def updateConfigFiles(self, name):
@@ -369,22 +388,23 @@ class Theme(object):
             self.updateConfigFile(name, rule)
     
     @staticmethod
-    def getColorConfig(name):
-        return ConfigObj(getFilePath(name, "colors"), indent_type = "\t", unrepr = True)
+    def getThemeConfig(name):
+        return ConfigObj(getFilePath(name, "themeConfig.ini"), indent_type = "\t", unrepr = True)
 
-    def writeColorConfig(self, name):
-        colorConfig = Theme.getColorConfig(name)
-        colorConfig["lightColors"] = self.lightColors.colors
-        colorConfig["darkColors"] = self.darkColors.colors
-        colorConfig["foreground"] = self.foreground
-        colorConfig["background"] = self.background
-        colorConfig["cursor"] = self.cursor
-        colorConfig.write()
+    def writeThemeConfig(self, name):
+        themeConfig = Theme.getThemeConfig(name)
+        themeConfig["wallpaperFile"] = self.wallpaperFile
+        themeConfig["lightColors"] = self.lightColors.colors
+        themeConfig["darkColors"] = self.darkColors.colors
+        themeConfig["foreground"] = self.foreground
+        themeConfig["background"] = self.background
+        themeConfig["cursor"] = self.cursor
+        themeConfig.write()
  
     def create(self, name):
         callCommand("mkdir " + getFilePath(name))
         self.updateConfigFiles(name)
-        self.writeColorConfig(name)
+        self.writeThemeConfig(name)
 
     def changeLine(self, line, indeces, newValue):
         start = indeces[0]
@@ -531,16 +551,24 @@ class Rule(object):
         return [(key, value) for key, value in Rule.config[appName].items() if key.startswith("line ")]
 
 def main():
-    global Rules
-    Rules = Rule.loadAll()
     parseArgs()
 
+Rules = Rule.loadAll()
+Config = ConfigObj(getFilePath("config.ini"), unrepr = True)
+
+Point = namedtuple('Point', ('coords', 'n', 'ct'))
+Cluster = namedtuple('Cluster', ('points', 'center', 'n'))
+
 def getPoints(img):
-    points = []
+    lights = []
+    darks = []
     w, h = img.size
     for count, color in img.getcolors(w * h):
-        points.append(Point(color, 3, count))
-    return points
+        if isLight(color):
+            lights.append(Point(color, 3, 1))
+        elif isDark(color):
+            darks.append(Point(color, 3, 1))
+    return lights, darks
 
 def calculateCenter(points, n):
     # find the average of each rgb value in the point
@@ -587,3 +615,8 @@ def kmeans(points, k, minDiff):
 
 if __name__ == "__main__":
     main()
+    #img = Image.open("/home/aschey/Pictures/wallpapers/city.png")
+    #img.thumbnail((200, 200))
+
+    #points = getPoints(img)
+    #print([rgbToHex(map(int, cluster.center.coords)) for cluster in kmeans(points, 16, 50)])
