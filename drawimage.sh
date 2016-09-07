@@ -28,9 +28,5 @@ fi
 
 w3m_command="0;1;0;$y_margin;$width;$height;;;;;$FILENAME\n4;\n3;"
 
-#spaces=$(($y_margin / 10))
-#for i in $(seq 1 $spaces); do printf "\n"; done
-#printf "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
-
 tput cup $(($height/$FONTH)) 0
 echo -e $w3m_command|$W3MIMGDISPLAY

@@ -1,19 +1,17 @@
 #! /usr/bin/env python
 
 #TODO:
-    # enforce min distance between colors
-    # allow user to choose config dir
-    # configurable backup history size
     # random theme on startup
     # warn about backup when changing theme
-    # allow user to choose backgrounds
     # warn when any files have been changed
-    
+    # allow user to disable autodetect
+    # create install script
+    # allow user to save current config to a theme
+
 from PIL import Image
 from collections import namedtuple
 from math import sqrt
 from sys import argv, exit
-from sklearn import cluster
 from numpy import array
 from enum import Enum, unique
 from configobj import ConfigObj
@@ -22,41 +20,27 @@ import random
 import subprocess
 import os
 import re
+import kmeans
 
 CONFIG_DIR = os.path.expanduser("~/.synchronicity")
 CONFIG_FILE_PATH = CONFIG_DIR + "/rules.ini"
 
-def createClusters(points, n, filename):
-    #kmeans = cluster.KMeans(n_clusters = n)
-    #kmeans.fit(points)
-    #clusters = [c[:3] for c in kmeans.cluster_centers_]
-    rgbs = [list(map(int, cluster.center.coords)) for cluster in kmeans(points, n, 50)]
-    #rgbs = [list(map(int, c)) for c in clusters]
-    writeToPPM(rgbs, filename, n)
+def createClusters(points, numColors, filename):
+    minDistance = Config["minDistance"]
+
+    rgbs = [list(map(int, cluster.center.coords)) for cluster in kmeans.cluster(points, numColors, minDistance)]
+    # Create image file so the user can choose colors
+    writeToPPM(rgbs, filename, numColors)
     return list(map(rgbToHex, rgbs))
 
 # convert the decimal color values to a hex string
 def rgbToHex(rgb):
     return "#" + "".join("{0:02x}".format(val) for val in rgb).upper()
 
-def separateColors(rgbs):
-    lights = []
-    darks = []
-    for c in rgbs:
-        if isLight(c):
-            lights.append(c)
-        elif isDark(c):
-            darks.append(c)
-    return lights, darks
-
-def isLight(rgb):
-    return ((rgb[0] * 299) + (rgb[1] * 587) + (rgb[2] * 114)) / 1000 >= 50
-
-def isDark(rgb):
-    return ((rgb[0] * 299) + (rgb[1] * 587) + (rgb[2] * 114)) / 1000 <= 25
-
 def callCommand(command):
     retCode = subprocess.call(command, shell = True)
+    
+    # Don't let commands fail silently
     if not retCode == 0:
         print("command {0} failed with error code {1}".format(command, retCode))
         exit()
@@ -65,204 +49,181 @@ def getFilePath(*args):
     pathElements = [CONFIG_DIR] + list(args)
     return "/".join(pathElements)
 
-def writeArrayToFile(fileLines, newFileName):
-    # Note: Assumes newlines are already included
-    with open(newFileName, "w") as f:
-        for line in fileLines:
-            f.write(line)
-
 def writeToPPM(rgbs, filename, numColors):
-    colorwidth = 54
+    COLORWIDTH = 54
     with open(filename, 'w') as f:
+        # Write the header
         f.write('P3\n')
-        f.write(str(numColors * colorwidth) + " " + str(colorwidth) + "\n")
+        f.write(str(numColors * COLORWIDTH) + " " + str(COLORWIDTH) + "\n")
         f.write('255\n')
-        for i in range(colorwidth):
+
+        # Draw colors in a numColors * COLORWIDTH by COLORWIDTH block
+        for i in range(COLORWIDTH):
             for rgb in rgbs:
-                for j in range(colorwidth):
+                for j in range(COLORWIDTH):
                     for val in rgb:
                         f.write(str(val) + " ")
                     f.write("\n")
 
-def buildFormatString(numColors):
-    return "".join(["\\n" for i in range(6)]) + "   " + "".join(["%2d       " for i in range(numColors)])
+def getColorFormatString(numColors):
+    #return "".join(["\\n" for i in range(6)]) + "   " + "".join(["%2d       " for i in range(numColors)])
+    formatString = ""
+    # Make room to display the colors
+    formatString += formatString.join(["\\n" for i in range(6)])
+    formatString += "   "
+    # Display colors with enough space between them
+    formatString += "".join(["%2d       " for i in range(numColors)])
+    return formatString
 
-def getNumbersString(start, end):
+
+def numbersToString(start, end):
     return " ".join([str(i) for i in range(start, end)])
-
-def lineStringToList(lineString):
-    if len(lineString) == 0:
-        return []
-    modifyIndeces = []
-    splitLine = lineString.split(",")
-    for lineNumber in splitLine:
-        try:
-            lineNumber = int(lineNumber)
-            modifyIndeces.append(lineNumber)
-        except ValueError:
-            start = int(lineNumber[0])
-            end = int(lineNumber[2])
-            for i in range(start, end + 1):
-                modifyIndeces.append(i)
-    return sorted(modifyIndeces)
-
 
 def copyFiles(sourceDestPairs):
     command = ""
+    
+    # copy all files from their source to their destination
     for sourceDestPair in sourceDestPairs:
         command += "cp {0} {1};".format(sourceDestPair[0], sourceDestPair[1])
+
     callCommand(command)
 
 def printToScreen(numLights, numDarks):
     numColors = numDarks + numLights
-    lightFormat = buildFormatString(numLights)
-    darkFormat = buildFormatString(numDarks)
-    lightVals = getNumbersString(1, numLights + 1)
-    darkVals = getNumbersString(numLights + 1, numColors + 1)
+    lightFormat = getColorFormatString(numLights)
+    darkFormat = getColorFormatString(numDarks)
+    lightVals = numbersToString(1, numLights + 1)
+    darkVals = numbersToString(numLights + 1, numColors + 1)
 
-    command = "./drawimage.sh lightcolors.ppm 60; ./drawimage.sh darkcolors.ppm 140; printf \"{0}\n\" {1}; printf \"{2}\n\" {3};".format(lightFormat, lightVals, darkFormat, darkVals)
+    # Display light colors then dark colors
+    command = ("./drawimage.sh lightcolors.ppm 60; " +
+            "./drawimage.sh darkcolors.ppm 140; " + 
+            "printf \"{0}\n\" {1}; printf \"{2}\n\" {3};").format(lightFormat, lightVals, darkFormat, darkVals)
+
     callCommand(command)
 
 def createTheme(args):
-    numLights = args.l
-    numDarks = args.d
-    filename = args.f
-    name = args.n
-    callCommand("clear")
-    img = Image.open(filename)
-    #img.thumbnail((200, 200))
-    w, h = img.size
-    tmpPoints = []
-    for count, color in img.getcolors(w * h):
-        tmpPoints.append(color)
-    #lights, darks = separateColors(tmpPoints)
-    lights, darks = getPoints(img)
+    numLights = args.lights
+    numDarks = args.darks
+
+    img = Image.open(args.filename)
+    # Extract light and dark colors from the image
+    lights, darks = kmeans.getPoints(img)
+    print("Calculating colors...")
+
     lightRgbs = createClusters(lights, numLights, "lightcolors.ppm")
     darkRgbs = createClusters(darks, numDarks, "darkcolors.ppm")
     allRgbs = lightRgbs + darkRgbs
+
+    callCommand("clear")
     printToScreen(numLights, numDarks)
+    
     backgroundIndex = int(input("Which color do you want to be the background? "))
     foregroundIndex = int(input("Which color do you want to be the foreground? "))
     cursorIndex = int(input("Which color do you want to be the cursor? "))
-    palette = (lightRgbs if backgroundIndex > numLights else darkRgbs)
-    #print("pick 16 colors")
-    otherCols = []
-    #for i in range(16):
-    #    otherCols.append(colors[int(input())])
+
+    # Determine if the scheme should be dark on light or light on dark
+    palette, backgrounds = ((lightRgbs, darkRgbs) if backgroundIndex > numLights else (darkRgbs, lightRgbs))
+    # User-inputted indeces are one-based
     background = allRgbs[backgroundIndex - 1]
     foreground = allRgbs[foregroundIndex - 1]
     cursor = allRgbs[cursorIndex - 1]
-    #colors.remove(background)
+
     palette.remove(foreground)
     palette.remove(cursor)
-    random.shuffle(palette)
-    Theme(filename, lightRgbs, darkRgbs, foreground, background, cursor).create(name)
+    backgrounds.remove(background)
+
+    Theme(args.filename, lightRgbs, darkRgbs, foreground, background, cursor).create(args.name)
 
 def backup(args):
     sourceDestPairs = [(rule.filePath, getFilePath(rule.appName + ".backup")) for rule in Rules]
     copyFiles(sourceDestPairs)
 
 def createRule(args):
-    autodetect = not args.no_autodetect
     defaultColorType = ColorType[args.d]
-    Rule(args.f, args.a, args.i).create(autodetect, args.manual_background, args.manual_foreground, args.manual_cursor, defaultColorType)
+    autoBg = args.auto_bg
+    autoFg = args.auto_fg
+    autoCursor = args.auto_cursor
+
+    Rule(args.filename, args.appName, args.c).create(autoBg, autoFg, autoCursor, defaultColorType)
 
 def loadTheme(args):
-    Theme.load(args.n)
+    Theme.load(args.themeName)
 
 def revert(args):
     sourceDestPairs = [(getFilePath(rule.appName + ".backup"), rule.filePath) for rule in Rules]
     copyFiles(sourceDestPairs)
 
-def saveCurrent(args):
-    themeName = args.n
-    themePath = getFilePath(themeName)
-    sourceDestPairs = [(rule.filePath, getFilePath(themeName, rule.appName)) for rule in Rules]
-    if not os.path.isdir(themePath):
-        callCommand("mkdir " + themePath)
-
-    copyFiles(sourceDestPairs)
-
 def rmRule(args):
-    appName = args.n
-    del Rule.config[appName]
+    del Rule.config[args.appName]
     Rule.config.write()
 
 def rmTheme(args):
-    themeName = args.n
-    themePath = getFilePath(themeName)
+    themePath = getFilePath(args.themeName)
     callCommand("rm -r " + themePath)
 
 def reconfigure(args):
-    themeName = args.t
-    appName = args.a
-    theme = Theme.fromConfig(themeName)
-    rule = Rule.load(appName)
-    rule.shuffleColors()
-    theme.updateConfigFile(themeName, rule)
-
-def recreate(args):
-    themeName = args.n
+    theme = Theme.fromConfig(args.themeName)
+    rule = Rule.load(args.appName)
+    theme.shuffleColors()
+    theme.createAppConfigFile(args.themeName, rule)
 
 def startup(args):
-    themeName = args.n
-    Theme.loadWallpaper(themeName)
+    Theme.loadWallpaper(args.themeName)
 
 def parseArgs():
     argParser = ArgumentParser()
     subparsers = argParser.add_subparsers()
 
-    themeParser = subparsers.add_parser("theme")
-    themeParser.add_argument("-n", required = True)
-    themeParser.add_argument("-f", required = True)
-    themeParser.add_argument("-l", type = int, required = True)
-    themeParser.add_argument("-d", type = int, required = True)
+    themeParser = subparsers.add_parser("theme", help = "create a new theme")
+    themeParser.add_argument("name", help = "theme name")
+    themeParser.add_argument("filename", help = "image file to load the theme from")
+    themeParser.add_argument("lights", type = int, help = "number of light colors to use")
+    themeParser.add_argument("darks", type = int, help = "number of dark colors to use")
     themeParser.set_defaults(func = createTheme)
 
-    ruleParser = subparsers.add_parser("rule")
-    ruleParser.add_argument("-f", required = True)
-    ruleParser.add_argument("-a", required = True)
-    ruleParser.add_argument("-i", choices = ["hex", "rgb", "numeric"], default = "hex")
-    ruleParser.add_argument("-d", choices = ["dark", "light"], default = "light")
-    ruleParser.add_argument("--no-autodetect", action = "store_true")
-    ruleParser.add_argument("--manual-background", action = "store_true")
-    ruleParser.add_argument("--manual-foreground", action = "store_true")
-    ruleParser.add_argument("--manual-cursor", action = "store_true")
+    ruleParser = subparsers.add_parser("rule", help = "create a new rule")
+    ruleParser.add_argument("filename", help = "config file to create the rule for")
+    ruleParser.add_argument("appName", help = "name of the app the filename is used for")
+    ruleParser.add_argument("-c", choices = ["hex", "rgb", "numeric"], default = "hex", 
+            help = "(default: 'hex') color format the config file stores colors as")
+    ruleParser.add_argument("-d", choices = ["dark", "light"], default = "light", 
+            help = "(default: 'light') default color type to use")
+    ruleParser.add_argument("--auto-bg", action = "store_true", 
+            help = "use the background color designated for the theme")
+    ruleParser.add_argument("--auto-fg", action = "store_true", 
+            help = "use the foreground color designated for the theme")
+    ruleParser.add_argument("--auto-cursor", action = "store_true", 
+            help = "use the cursor color designated for the theme")
     ruleParser.set_defaults(func = createRule)
 
-    backupParser = subparsers.add_parser("backup")
+    backupParser = subparsers.add_parser("backup", help = "backup existing configuration")
     backupParser.set_defaults(func = backup)
 
-    loadParser = subparsers.add_parser("load")
-    loadParser.add_argument("n")
+    loadParser = subparsers.add_parser("load", help = "load a theme")
+    loadParser.add_argument("themeName")
     loadParser.set_defaults(func = loadTheme)
 
-    revertParser = subparsers.add_parser("revert")
+    revertParser = subparsers.add_parser("revert", help = "revert config files to their backup copy")
     revertParser.set_defaults(func = revert)
 
-    rmRuleParser = subparsers.add_parser("rm-rule")
-    rmRuleParser.add_argument("n")
+    rmRuleParser = subparsers.add_parser("rm-rule", help = "remove a rule from the rule config file")
+    rmRuleParser.add_argument("appName")
     rmRuleParser.set_defaults(func = rmRule)
 
-    rmThemeParser = subparsers.add_parser("rm-theme")
-    rmThemeParser.add_argument("n")
+    rmThemeParser = subparsers.add_parser("rm-theme", help = "delete a theme")
+    rmThemeParser.add_argument("themeName")
     rmThemeParser.set_defaults(func = rmTheme)
 
-    saveCurrentParser = subparsers.add_parser("save-current")
-    saveCurrentParser.add_argument("n")
-    saveCurrentParser.set_defaults(func = saveCurrent)
-
-    reconfigureParser = subparsers.add_parser("reconfigure")
-    reconfigureParser.add_argument("a")
-    reconfigureParser.add_argument("-t", required = True)
+    reconfigureParser = subparsers.add_parser("reconfigure", 
+            help = "generate a new colorscheme for one app using the colors for the specified theme")
+    reconfigureParser.add_argument("appName")
+    reconfigureParser.add_argument("themeName")
     reconfigureParser.set_defaults(func = reconfigure)
 
-    recreateParser = subparsers.add_parser("recreate")
-    recreateParser.add_argument("n")
-    recreateParser.set_defaults(func = recreate)
-
-    startupParser = subparsers.add_parser("startup")
-    startupParser.add_argument("n")
+    startupParser = subparsers.add_parser("startup", 
+            help = "use this option to load the theme wallpaper at startup")
+    startupParser.add_argument("themeName")
     startupParser.set_defaults(func = startup)
 
     args = argParser.parse_args()
@@ -295,9 +256,13 @@ class ColorList(object):
     def next(self):
         currentColor = self.colors[self.index]
         self.index += 1
+        # Start from the first color if all colors have been used
         if self.index == len(self.colors):
             self.index = 0
         return currentColor
+
+    def shuffle(self):
+        random.shuffle(self.colors)
 
 class Line(object): 
     def __init__(self, lineNumber, useCursorColor = False, useBackgroundColor = False, useForegroundColor = False):
@@ -313,9 +278,11 @@ class ColorString(object):
         self.color = color
         self.colorType = colorType
 
+    # For serialization
     def toDict(self):
         return { "indeces": self.indeces, "color": self.color, "colorType": self.colorType.value }
 
+    # For deserialization
     @staticmethod
     def fromDict(colorStringDict):
         return ColorString(colorStringDict["indeces"], colorStringDict["color"], ColorType[colorStringDict["colorType"]])
@@ -332,23 +299,31 @@ class Theme(object):
     @classmethod
     def fromConfig(cls, name):
         themeConfig = cls.getThemeConfig(name)
+
         wallpaperFile = themeConfig["wallpaperFile"]
         lightColors = themeConfig["lightColors"]
         darkColors = themeConfig["darkColors"]
         foreground = themeConfig["foreground"]
         background = themeConfig["background"]
         cursor = themeConfig["cursor"]
+
         return cls(wallpaperFile, lightColors, darkColors, foreground, background, cursor)
 
     @staticmethod
     def loadWallpaper(themeName):
         themeConfig = ConfigObj(getFilePath(themeName, "themeConfig.ini"), unrepr = True)
+        # Call the command located in the config file to load the specified wallpaper
         command = Config["wallpaperCmd"].strip() + " " + themeConfig["wallpaperFile"]
         callCommand(command)
 
     @staticmethod
     def load(name):
+        if not os.path.isdir(getFilePath(name)):
+            print("Error: Theme {0} does not exist".format(name))
+            exit(1)
+
         Theme.loadWallpaper(name)
+        # Copy the files from the theme folder to their actual config paths
         sourceDestPairs = [(getFilePath(name, rule.appName), rule.filePath) for rule in Rules]
         copyFiles(sourceDestPairs)
 
@@ -368,24 +343,35 @@ class Theme(object):
         return self.darkColors.next()
 
     def shuffleColors(self):
-        random.shuffle(lightColors)
-        random.shuffle(darkColors)
+        self.lightColors.shuffle()
+        self.darkColors.shuffle()
 
-    def updateConfigFile(self, name, rule):
-        colorIndex = 0
+    def _writeArrayToFile(self, fileLines, newFileName):
+        # Note: Assumes newlines are already included
+        with open(newFileName, "w") as f:
+            for line in fileLines:
+                f.write(line)
+
+    def createAppConfigFile(self, name, rule):
+        # Load the whole config file for easier editing
         with open(rule.filePath, "r") as f:
             configLines = [line for line in f]
+
         for line in rule.lines:
             editLine = configLines[line.lineNumber]
             newLine = editLine
             for colorString in line.colorStrings:
+                # Edit the line one color at a time
                 newLine = self.changeLine(newLine, colorString.indeces, self.nextColor(line, colorString))
-            configLines[line.lineNumber] = newLine
-        writeArrayToFile(configLines, getFilePath(name, rule.appName))
 
-    def updateConfigFiles(self, name):
+            configLines[line.lineNumber] = newLine
+        
+        # Create the new config file in the current theme's directory
+        self._writeArrayToFile(configLines, getFilePath(name, rule.appName))
+
+    def createAppConfigFiles(self, name):
         for rule in Rules:
-            self.updateConfigFile(name, rule)
+            self.createAppConfigFile(name, rule)
     
     @staticmethod
     def getThemeConfig(name):
@@ -403,7 +389,7 @@ class Theme(object):
  
     def create(self, name):
         callCommand("mkdir " + getFilePath(name))
-        self.updateConfigFiles(name)
+        self.createAppConfigFiles(name)
         self.writeThemeConfig(name)
 
     def changeLine(self, line, indeces, newValue):
@@ -420,53 +406,6 @@ class Rule(object):
         self.mode = ColorRegex[inputFormat]
         self.lines = []
 
-    def create(self, autodetect, manualBg, manualFg, manualCursor, defaultColorType):
-        lines = []
-        lineNo = 0
-        search = re.compile(self.mode.value)
-        linesFound = []
-        lines = []
-        if autodetect:
-            print("Possible lines to modify found:")
-            with open(self.filePath, "r") as f:
-                for line in f:
-                    matches = search.findall(line)
-                    if len(matches) > 0:
-                        textLine = Line(lineNumber = lineNo,
-                                useCursorColor = (True if manualCursor and "cursor" in line else False),
-                                useBackgroundColor = (True if manualBg and "background" in line else False),
-                                useForegroundColor = (True if manualFg and "foreground" in line else False))
-                        lines.append(LineMatch(line.strip(), lineNo, matches))
-                        start = 0
-                        for match in matches:
-                            indeces = self.getIndeces(start, match, line)
-                            textLine.colorStrings.append(ColorString(indeces, match, defaultColorType))
-                            start = indeces[1]
-                        linesFound.append(textLine)
-                    lineNo += 1
-            self.printLines(lines)
-        else:
-            pass
-            #TODO: function to get manual lines
-        modifyLines = input("Enter which lines you wish to modify. Enter nothing to modify all lines. Example: 2-5,8,10 ").replace(" ", "")
-        modifyAll = (True if len(modifyLines) == 0 else False)
-        if modifyAll:
-            self.lines = linesFound
-        else:
-            modifyList = lineStringToList(linesToModify)
-            for i in range(len(linesFound)):
-                if i in modifyList:
-                    self.lines.append(linesFound[i])
-        print()
-        self.printLinesAndColors(lines)
-        nonDefaultColorType = (ColorType.light if defaultColorType == ColorType.dark else ColorType.dark)
-        nonDefaultLines = input("Enter which lines should use {0} colors. Enter nothing to use {1} colors for all lines. ".format(nonDefaultColorType.name, defaultColorType.name)).strip()
-        nonDefaultList = lineStringToList(nonDefaultLines)
-        colorList = [colorString for line in self.lines for colorString in line.colorStrings]
-        for lineNumber in nonDefaultList:
-            colorList[lineNumber - 1].colorType = nonDefaultColorType
-        self.save()
-
     @staticmethod
     def serializeColorStrings(colorStrings):
         return [colorString.toDict() for colorString in colorStrings]
@@ -475,33 +414,48 @@ class Rule(object):
     def deserializeColorStrings(colorStringDict):
         return [ColorString.fromDict(colorString) for colorString in colorStringDict]
 
-    def getIndeces(self, start, match, line):
-        for i in range(start, len(line) - len(match)):
-            if line[i:i + len(match)] == match:
-                return (i, i + len(match))
-        return None
+    def create(self, autoBg, autoFg, autoCursor, defaultColorType):
+        linesFound, linesToDisplay = self._autodetectLines(autoBg, autoFg, autoCursor, defaultColorType)
 
-    def printLines(self, lines):
-        for i in range(len(lines)):
-            print("{0}. (Line {1}) {2}".format(i + 1, lines[i].lineNo + 1, lines[i].text))
+        modifyLines = input("Enter which lines you wish to modify. " + 
+                "Enter nothing to modify all lines. Example: 2-5,8,10 ").replace(" ", "")
+        modifyAll = (True if len(modifyLines) == 0 else False)
 
-    def printLinesAndColors(self, lines):
-        colorIndex = 1
-        for line in lines:
-            print("(Line {0}) {1}".format(line.lineNo + 1, line.text))
-            for color in line.colors:
-                print("\t{0}. {1}".format(colorIndex, color)) 
-                colorIndex += 1
-            print()
+        if modifyAll:
+            self.lines = linesFound
+        else:
+            modifyList = self._lineStringToList(linesToModify)
+            for i in range(len(linesFound)):
+                if i in modifyList:
+                    self.lines.append(linesFound[i])
+        print()
+        # Print the lines and all of their colors to allow the user to choose light and dark colors
+        self._printLinesAndColors(linesToDisplay)
+
+        nonDefaultColorType = (ColorType.light if defaultColorType == ColorType.dark else ColorType.dark)
+        nonDefaultLines = input(("Enter which lines should use {0} colors. " + 
+                "Enter nothing to use {1} colors for all lines. ").format(nonDefaultColorType.name, 
+                    defaultColorType.name)).strip()
+
+        nonDefaultList = self._lineStringToList(nonDefaultLines)
+        colorList = [colorString for line in self.lines for colorString in line.colorStrings]
+        # Update the substrings that should not use the default color type
+        for lineNumber in nonDefaultList:
+            colorList[lineNumber - 1].colorType = nonDefaultColorType
+
+        # Write the rule to the config file
+        self.save()
 
     def save(self):
         if not os.path.isdir(CONFIG_DIR):
             callCommand("mkdir " + CONFIG_DIR)
 
+        # Create a new section in the config file for this rule
         Rule.config[self.appName] = {}
         configRule = Rule.config[self.appName]
         configRule["filePath"] = self.filePath
         configRule["mode"] = self.mode.name
+
         lineNumber = 1
         for line in self.lines:
             lineHeader = "line " + str(lineNumber)
@@ -516,7 +470,8 @@ class Rule(object):
                 lineConfig["background"] = True
             elif line.useForegroundColor:
                 lineConfig["foreground"] = True
-
+            
+            # ConfigObj can't store user-defined objects, so serialize to dict
             lineConfig["substringsToEdit"] = Rule.serializeColorStrings(line.colorStrings)
 
         Rule.config.write()
@@ -536,87 +491,106 @@ class Rule(object):
         rule.filePath = values["filePath"]
         rule.mode = values["mode"]
 
-        for key, lineValues in Rule.getLineNumberItems(appName):
+        for key, lineValues in Rule._getLineNumberItems(appName):
             line = Line(lineNumber = lineValues["lineNumber"])
             line.useCursorColor = lineValues.get("cursor", False)
             line.useBackgroundColor = lineValues.get("background", False)
             line.useForegroundColor = lineValues.get("foreground", False)
+            # Convert dictionaries into ColorString objects
             line.colorStrings = Rule.deserializeColorStrings(lineValues["substringsToEdit"])
             rule.lines.append(line) 
 
         return rule
 
+    def _autodetectLines(self, autoBg, autoFg, autoCursor, defaultColorType):
+        lineNo = 0
+        textLines = []
+        lines = []
+        search = re.compile(self.mode.value)
+
+        print("Possible lines to modify found:")
+        with open(self.filePath, "r") as f:
+            for textLine in f:
+                # Search for substrings in the line that match the color regex
+                matches = search.findall(textLine)
+                if len(matches) > 0:
+                    line = Line(lineNumber = lineNo,
+                            useCursorColor = (True if autoCursor and "cursor" in textLine else False),
+                            useBackgroundColor = (True if autoBg and "background" in textLine else False),
+                            useForegroundColor = (True if autoFg and "foreground" in textLine else False))
+                    textLines.append(LineMatch(textLine.strip(), lineNo, matches))
+                    start = 0
+                    for match in matches:
+                        indeces = self._getIndeces(start, match, textLine)
+                        line.colorStrings.append(ColorString(indeces, match, defaultColorType))
+                        start = indeces[1]
+                    lines.append(line)
+                lineNo += 1
+        # Display the lines found to the user so the user can choose which lines to modify
+        self._printLines(textLines)
+
+        return lines, textLines
+    
+    def _getIndeces(self, start, match, line):
+        #for i in range(start, len(line) - len(match)):
+        #    if line[i:i + len(match)] == match:
+        #        return (i, i + len(match))
+        #return None
+        try:
+            start = line.index(match, start)
+            end = start + len(match)
+            return (start, end)
+        except ValueError:
+            return None
+
+    def _lineStringToList(self, lineString):
+        if len(lineString) == 0:
+            return []
+        modifyIndeces = []
+        splitLine = lineString.split(",")
+        for lineNumber in splitLine:
+            try:
+                lineNumber = int(lineNumber)
+                modifyIndeces.append(lineNumber)
+            except ValueError:
+                # Number is formatted like '1-5' instead of just '1'
+                start = int(lineNumber[0])
+                end = int(lineNumber[2])
+
+                # Include the whole range of numbers
+                for i in range(start, end + 1):
+                    modifyIndeces.append(i)
+
+        # Sort in case user entered numbers out of order
+        return sorted(modifyIndeces)
+
+
+    def _printLines(self, lines):
+        for i in range(len(lines)):
+            # Indeces displayed to user are one-based instead of zero-based
+            print("{0}. (Line {1}) {2}".format(i + 1, lines[i].lineNo + 1, lines[i].text))
+
+    def _printLinesAndColors(self, lines):
+        colorIndex = 1
+        for line in lines:
+            print("(Line {0}) {1}".format(line.lineNo + 1, line.text))
+            for color in line.colors:
+                print("\t{0}. {1}".format(colorIndex, color)) 
+                colorIndex += 1
+            print()
+
     @staticmethod
-    def getLineNumberItems(appName):
+    def _getLineNumberItems(appName):
+        # Return all config data for lines formatted like "[[line xxx]]"
         return [(key, value) for key, value in Rule.config[appName].items() if key.startswith("line ")]
 
+    
+    
 def main():
     parseArgs()
 
 Rules = Rule.loadAll()
 Config = ConfigObj(getFilePath("config.ini"), unrepr = True)
 
-Point = namedtuple('Point', ('coords', 'n', 'ct'))
-Cluster = namedtuple('Cluster', ('points', 'center', 'n'))
-
-def getPoints(img):
-    lights = []
-    darks = []
-    w, h = img.size
-    for count, color in img.getcolors(w * h):
-        if isLight(color):
-            lights.append(Point(color, 3, 1))
-        elif isDark(color):
-            darks.append(Point(color, 3, 1))
-    return lights, darks
-
-def calculateCenter(points, n):
-    # find the average of each rgb value in the point
-    vals = [0.0 for i in range(n)]
-    plen = 0
-    for p in points:
-        plen += p.ct
-        for i in range(n):
-            vals[i] += (p.coords[i] * p.ct)
-    return Point([(v / plen) for v in vals], n, 1)
-
-def euclidean(p1, p2):
-    return sqrt(sum([(p1.coords[i] - p2.coords[i]) ** 2 for i in range(p1.n)]))
-
-def kmeans(points, k, minDiff):
-    # choose k random points to start each cluster
-    clusters = [Cluster([p], p, p.n) for p in random.sample(points, k)]
-    while True:
-        plists = [[] for i in range(k)]
-
-        for p in points:
-            smallestDist = float('Inf')
-            for i in range(k):
-                # calculate the distance from each point to the center of each cluster
-                dist = euclidean(p, clusters[i].center)
-                if dist < smallestDist:
-                    smallestDist = dist
-                    idx = i
-            # add the point to the cluster where it's closest to the center
-            plists[idx].append(p)
-
-        diff = 0
-        for i in range(k):
-            old = clusters[i]
-            center = calculateCenter(plists[i], old.n)
-            new = Cluster(plists[i], center, old.n)
-            clusters[i] = new
-            diff = max(diff, euclidean(old.center, new.center))
-
-        if diff < minDiff:
-            break
-
-    return clusters
-
 if __name__ == "__main__":
     main()
-    #img = Image.open("/home/aschey/Pictures/wallpapers/city.png")
-    #img.thumbnail((200, 200))
-
-    #points = getPoints(img)
-    #print([rgbToHex(map(int, cluster.center.coords)) for cluster in kmeans(points, 16, 50)])
