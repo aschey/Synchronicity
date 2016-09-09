@@ -7,6 +7,7 @@
     # allow user to disable autodetect
     # create install script
     # allow user to save current config to a theme
+    # auto-load theme on startup
 
 from PIL import Image
 from collections import namedtuple
@@ -169,7 +170,8 @@ def reconfigure(args):
     theme.createAppConfigFile(args.themeName, rule)
 
 def startup(args):
-    Theme.loadWallpaper(args.themeName)
+    themeName = Config["currentTheme"]
+    Theme.loadWallpaper(themeName)
 
 def parseArgs():
     argParser = ArgumentParser()
@@ -223,7 +225,6 @@ def parseArgs():
 
     startupParser = subparsers.add_parser("startup", 
             help = "use this option to load the theme wallpaper at startup")
-    startupParser.add_argument("themeName")
     startupParser.set_defaults(func = startup)
 
     args = argParser.parse_args()
@@ -326,6 +327,10 @@ class Theme(object):
         # Copy the files from the theme folder to their actual config paths
         sourceDestPairs = [(getFilePath(name, rule.appName), rule.filePath) for rule in Rules]
         copyFiles(sourceDestPairs)
+
+        # Update the config to reflect the theme change
+        Config["currentTheme"] = name
+        Config.write()
 
     def nextColor(self, line, colorString):
         if line.useBackgroundColor:
