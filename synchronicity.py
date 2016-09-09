@@ -42,13 +42,19 @@ def callCommand(command):
     retCode = subprocess.call(command, shell = True)
     
     # Don't let commands fail silently
-    if not retCode == 0:
-        print("command {0} failed with error code {1}".format(command, retCode))
-        exit()
+    checkForError(retCode != 0, "command {0} failed with error code {1}".format(command, retCode), retCode)
+
+def checkForError(condition, message, errorCode = 1):
+    if condition:
+        print(message)
+        exit(errorCode)
 
 def getFilePath(*args):
     pathElements = [CONFIG_DIR] + list(args)
     return "/".join(pathElements)
+
+def errorIfNoTheme(themeName):
+    checkForError(not os.path.isdir(getFilePath(themeName)), "Error: theme does not exist")
 
 def writeToPPM(rgbs, filename, numColors):
     COLORWIDTH = 54
@@ -67,7 +73,6 @@ def writeToPPM(rgbs, filename, numColors):
                     f.write("\n")
 
 def getColorFormatString(numColors):
-    #return "".join(["\\n" for i in range(6)]) + "   " + "".join(["%2d       " for i in range(numColors)])
     formatString = ""
     # Make room to display the colors
     formatString += formatString.join(["\\n" for i in range(6)])
@@ -97,8 +102,8 @@ def printToScreen(numLights, numDarks):
     darkVals = numbersToString(numLights + 1, numColors + 1)
 
     # Display light colors then dark colors
-    command = ("./drawimage.sh lightcolors.ppm 60; " +
-            "./drawimage.sh darkcolors.ppm 140; " + 
+    command = ("./drawimage.sh lightColors.ppm 60; " +
+            "./drawimage.sh darkColors.ppm 140; " + 
             "printf \"{0}\n\" {1}; printf \"{2}\n\" {3};").format(lightFormat, lightVals, darkFormat, darkVals)
 
     callCommand(command)
@@ -110,10 +115,12 @@ def createTheme(args):
     img = Image.open(args.filename)
     # Extract light and dark colors from the image
     lights, darks = kmeans.getPoints(img)
-    print("Calculating colors...")
+    checkForError(len(lights) < numLights, "Error: image does not contain enough light colors")
+    checkForError(len(darks) < numDarks, "Error: image does not contain enough dark colors")
 
-    lightRgbs = createClusters(lights, numLights, "lightcolors.ppm")
-    darkRgbs = createClusters(darks, numDarks, "darkcolors.ppm")
+    print("Calculating colors...")
+    lightRgbs = createClusters(lights, numLights, "lightColors.ppm")
+    darkRgbs = createClusters(darks, numDarks, "darkColors.ppm")
     allRgbs = lightRgbs + darkRgbs
 
     callCommand("clear")
@@ -133,6 +140,9 @@ def createTheme(args):
     palette.remove(foreground)
     palette.remove(cursor)
     backgrounds.remove(background)
+
+    # Don't need image files anymore
+    callCommand("rm lightColors.ppm; rm darkColors.ppm")
 
     Theme(args.filename, lightRgbs, darkRgbs, foreground, background, cursor).create(args.name)
 
@@ -228,6 +238,9 @@ def parseArgs():
     startupParser.set_defaults(func = startup)
 
     args = argParser.parse_args()
+    if hasattr(args, "themeName"):
+        errorIfNoTheme(args.themeName)
+
     if hasattr(args, "func"):
         args.func(args)
     else:
@@ -332,30 +345,9 @@ class Theme(object):
         Config["currentTheme"] = name
         Config.write()
 
-    def nextColor(self, line, colorString):
-        if line.useBackgroundColor:
-            return self.background
-
-        if line.useForegroundColor:
-            return self.foreground
-
-        if line.useCursorColor:
-            return self.cursor
-
-        if colorString.colorType == ColorType.light:
-            return self.lightColors.next()
-
-        return self.darkColors.next()
-
     def shuffleColors(self):
         self.lightColors.shuffle()
         self.darkColors.shuffle()
-
-    def _writeArrayToFile(self, fileLines, newFileName):
-        # Note: Assumes newlines are already included
-        with open(newFileName, "w") as f:
-            for line in fileLines:
-                f.write(line)
 
     def createAppConfigFile(self, name, rule):
         # Load the whole config file for easier editing
@@ -367,7 +359,7 @@ class Theme(object):
             newLine = editLine
             for colorString in line.colorStrings:
                 # Edit the line one color at a time
-                newLine = self.changeLine(newLine, colorString.indeces, self.nextColor(line, colorString))
+                newLine = self._changeLine(newLine, colorString.indeces, self._nextColor(line, colorString))
 
             configLines[line.lineNumber] = newLine
         
@@ -382,7 +374,12 @@ class Theme(object):
     def getThemeConfig(name):
         return ConfigObj(getFilePath(name, "themeConfig.ini"), indent_type = "\t", unrepr = True)
 
-    def writeThemeConfig(self, name):
+    def create(self, name):
+        callCommand("mkdir " + getFilePath(name))
+        self.createAppConfigFiles(name)
+        self._writeThemeConfig(name)
+
+    def _writeThemeConfig(self, name):
         themeConfig = Theme.getThemeConfig(name)
         themeConfig["wallpaperFile"] = self.wallpaperFile
         themeConfig["lightColors"] = self.lightColors.colors
@@ -391,16 +388,33 @@ class Theme(object):
         themeConfig["background"] = self.background
         themeConfig["cursor"] = self.cursor
         themeConfig.write()
- 
-    def create(self, name):
-        callCommand("mkdir " + getFilePath(name))
-        self.createAppConfigFiles(name)
-        self.writeThemeConfig(name)
 
-    def changeLine(self, line, indeces, newValue):
+
+    def _changeLine(self, line, indeces, newValue):
         start = indeces[0]
         end = indeces[1]
         return line[:start] + newValue + line[end:]
+
+    def _writeArrayToFile(self, fileLines, newFileName):
+        # Note: Assumes newlines are already included
+        with open(newFileName, "w") as f:
+            for line in fileLines:
+                f.write(line)
+
+    def _nextColor(self, line, colorString):
+        if line.useBackgroundColor:
+            return self.background
+
+        if line.useForegroundColor:
+            return self.foreground
+
+        if line.useCursorColor:
+            return self.cursor
+
+        if colorString.colorType == ColorType.light:
+            return self.lightColors.next()
+
+        return self.darkColors.next()
 
 class Rule(object):
     config = ConfigObj(CONFIG_FILE_PATH, indent_type = "\t", unrepr = True)
@@ -537,10 +551,6 @@ class Rule(object):
         return lines, textLines
     
     def _getIndeces(self, start, match, line):
-        #for i in range(start, len(line) - len(match)):
-        #    if line[i:i + len(match)] == match:
-        #        return (i, i + len(match))
-        #return None
         try:
             start = line.index(match, start)
             end = start + len(match)
