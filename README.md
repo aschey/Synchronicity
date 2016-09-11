@@ -95,4 +95,8 @@ Delete the theme
 
 Place this command in `~/.xinitrc` or some equivalent in order to load the image file on startup.
 
-![Imgur](http://i.imgur.com/OyIpFHc.png)
+## Screenshots
+
+![Dots](http://i.imgur.com/OyIpFHc.png)
+![Triangles](http://i.imgur.com/KtO5onC.png)
+![Arch](http://i.imgur.com/xHpnxf2.png)
