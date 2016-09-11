@@ -81,7 +81,7 @@ Synchronicity responds to the following commands:
 
 `synchonicity reconfigure appName themeName`
 
-* Shuffle the order of the colors in a particular rule. Use this option if you like the overall colorscheme for the theme but one app has colors that don't look right together.
+* Shuffles the order of the colors in a particular rule. Use this option if you like the overall colorscheme for the theme but one app has colors that don't look right together.
 
 * **appName:** Name of the app to reconfigure
 

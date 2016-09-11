@@ -1,0 +1,33 @@
+@namespace url(http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul);
+@-moz-document url(chrome://browser/content/browser.xul) {
+
+.urlbar-history-dropmarker, #back-button, #forward-button, #urlbar-reload-button,
+#urlbar-stop-button {
+    display: none !important;
+}
+
+#urlbar, #searchbar .searchbar-textbox {
+    font-family: Condensed DejaVu Sans !important;
+}
+
+.tabbrowser-tabs . tab-text {
+    font-family: "terminus" !important;
+}
+#nav-bar {
+    background: #101B1E !important;
+    font-family: "terminus" !important;
+}
+
+#urlbar {
+    color: #55747D !important;
+    background: #101B1E !important;
+    border: none !important;
+    margin-left: -5px !important;
+    font-family: "terminus" !important;
+}
+.tabbrowser-tabs {
+    background: #101B1E !important;
+    color: #B9B3B1 !important;
+    font-family: "terminus" !important;
+}
+}
