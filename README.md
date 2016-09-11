@@ -2,18 +2,18 @@
 
 Synchronicity is a command-line utility for creating and maintaining unified colorschemes for all your Linux applications.
 
-Synchronicity utilizes two major concepts: rules and themes.
+Synchronicity uses two major concepts: rules and themes.
 
-**Rules** are stored in `~/.synchronicity/rules.ini` and contain information on all configuration files that the user has created a rule for. The purpose of a rule is to determine which parts of each configuration file are responsible for setting the colors of the application that the coniguration file corresponds to.
+**Rules** are stored in `~/.synchronicity/rules.ini`. The purpose of a rule is to determine which parts of a configuration file are responsible for setting the colors of the application that the coniguration file corresponds to.
 
-**Themes** each have their own directory (`~/.synchronicity/{themeName}`). When a theme is created, it takes each original configuration file, replaces its colors with the colors generated for the theme, and places the newly created copy in the theme's directory. When the theme is loaded, it replaces the actual configuration files with the ones in the theme's directory. Themes also have their own configuration files (`~/.synchronicity/{themeName}/themeConfig.ini`) which contain data on the theme's colors and where the image used to generate the theme is located.
+**Themes** each have their own directory (`~/.synchronicity/themeName`). When a theme is created, it takes each original configuration file, replaces its colors with the colors generated for the theme, and places the newly created copy in the theme's directory. When the theme is loaded, it replaces the actual configuration files with the ones in the theme's directory. Themes also have their own configuration files (`~/.synchronicity/themeName/themeConfig.ini`) which contain data on the theme's colors and where the image used to generate the theme is located.
 
 ## Documentation
 Synchronicity responds to the following commands:
 
 `synchronicity theme name filename lights darks`
 
-Create a new theme
+* Creates a new theme
 
 * **name:** What the theme will be called
 
@@ -29,7 +29,7 @@ Create a new theme
 
 `synchronicity rule appName filename [-c] [-d] [--auto-fg] [--auto-bg] [--auto-cursor]`
 
-Create a new rule
+* Creates a new rule
 
 * **appName:** Alias to use for the application that the configuration file corresponds to
 
@@ -37,9 +37,9 @@ Create a new rule
 
 * optional arguments:
 
-    * **-c {hex, rgb, numeric} default: hex** Color format that the configuration file uses for colors. Ex: Hex = #000000, RGB = 00,00,00, numeric = 00
+    * **-c {hex, rgb, numeric} default: hex** Color format that the configuration file uses for colors. (hex: #000000, RGB: 00,00,00, numeric: 00)
 
-    * **-d {dark, light} default: light** Default color type to use.
+    * **-d {dark, light} default: light** Default color type to use. The user will have to manually select the lines in the configuration file that should not use the default color type.
 
     * **--auto-bg** Use the designated background color for the theme where the configuration file contains a line like "background #000000"
 
@@ -51,11 +51,11 @@ Create a new rule
 
 `synchronicity backup`
 
-Backup the all of the configuration files which have a rule configured for them. Backup files will be placed in `~/.synchronicity/{appName}.backup`. This allows the user to try out new themes without losing their current configuration if it is not currently stored in its own theme.
+* Backs up the all of the configuration files which have a rule configured for them. Backup files will be placed in `~/.synchronicity/appName.backup`. This allows the user to try out new themes without losing their current configuration if it is not currently stored in its own theme.
 
 `synchonicity load themeName`
 
-Load a theme
+* Loads a theme
 
 * **themeName:** Name of the theme to load
 
@@ -63,19 +63,19 @@ Load a theme
 
 `synchronicity revert`
 
-Revert all config files to the copies stored in `~/.synchronicity/{appName}.backup`
+* Reverts all config files to the copies stored in `~/.synchronicity/{appName}.backup`
 
-* This is used to restore all config files saved by running `synchonicity backup`.
+* This is used to restore all config files saved by running `synchonicity backup`
 
 `synchronicity rm-rule appName`
 
-Delete the rule from `rules.ini`
+* Deletes the rule from `rules.ini`
 
 * Example: `synchronicity rm-rule i3`
 
 `synchonicity rm-theme themeName`
 
-Delete the theme
+* Deletes the theme
 
 * Example: `synchronicity rm-theme diamonds`
 
@@ -93,7 +93,7 @@ Delete the theme
 
 `synchronicity startup`
 
-Place this command in `~/.xinitrc` or some equivalent in order to load the image file on startup.
+* Place this command in `~/.xinitrc` or some equivalent in order to load the image file on startup.
 
 ## Screenshots
 
