@@ -7,7 +7,6 @@
     # allow user to disable autodetect
     # create install script
     # allow user to save current config to a theme
-    # auto-load theme on startup
 
 from PIL import Image
 from collections import namedtuple
