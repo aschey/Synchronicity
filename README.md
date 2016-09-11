@@ -89,6 +89,10 @@ Delete the theme
 
 * Example: `reconfigure i3 diamonds`
 
+* Note: If you run `synchronicity reconfigure` on the current theme, you will have to run `synchronicity load` to see the changes.
+
 `synchronicity startup`
 
 Place this command in `~/.xinitrc` or some equivalent in order to load the image file on startup.
+
+![Imgur](http://i.imgur.com/OyIpFHc.png)
