@@ -7,6 +7,7 @@
     # allow user to disable autodetect
     # create install script
     # allow user to save current config to a theme
+    # allow manual choosing of background, foreground, cursor colors
 
 from PIL import Image
 from collections import namedtuple
@@ -194,8 +195,8 @@ def parseArgs():
     themeParser.set_defaults(func = createTheme)
 
     ruleParser = subparsers.add_parser("rule", help = "create a new rule")
-    ruleParser.add_argument("filename", help = "config file to create the rule for")
     ruleParser.add_argument("appName", help = "name of the app the filename is used for")
+    ruleParser.add_argument("filename", help = "config file to create the rule for")
     ruleParser.add_argument("-c", choices = ["hex", "rgb", "numeric"], default = "hex", 
             help = "(default: 'hex') color format the config file stores colors as")
     ruleParser.add_argument("-d", choices = ["dark", "light"], default = "light", 
