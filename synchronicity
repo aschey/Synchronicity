@@ -1,1 +1,2 @@
+# Shortcut for running the python script
 ./synchronicity.py "$@"

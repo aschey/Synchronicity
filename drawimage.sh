@@ -1,6 +1,9 @@
 #!/bin/bash
-#
-# z3bra -- 2014-01-21
+
+# Displays images in the terminal
+
+# Taken from z3bra's implementation in this post:
+# http://blog.z3bra.org/2014/01/images-in-terminal.html
 
 test -z "$1" && exit
 

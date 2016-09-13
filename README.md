@@ -1,4 +1,4 @@
-# Synchronicity: A themer for Linux
+# Synchronicity
 
 Synchronicity is a command-line utility for creating and maintaining unified colorschemes for all your Linux applications.
 
