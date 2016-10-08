@@ -183,6 +183,10 @@ def startup(args):
     themeName = Config["currentTheme"]
     Theme.loadWallpaper(themeName)
 
+def randomTheme(args):
+    themes = next(os.walk(CONFIG_DIR))[1]
+    Theme.load(random.choice(themes))
+
 def parseArgs():
     argParser = ArgumentParser()
     subparsers = argParser.add_subparsers()
@@ -236,6 +240,9 @@ def parseArgs():
     startupParser = subparsers.add_parser("startup", 
             help = "use this option to load the theme wallpaper at startup")
     startupParser.set_defaults(func = startup)
+
+    randomParser = subparsers.add_parser("random", help = "load a random theme")
+    randomParser.set_defaults(func = randomTheme)
 
     args = argParser.parse_args()
     if hasattr(args, "themeName"):

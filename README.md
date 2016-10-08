@@ -93,7 +93,11 @@ Synchronicity responds to the following commands:
 
 `synchronicity startup`
 
-* Place this command in `~/.xinitrc` or some equivalent in order to load the image file on startup.
+* Place this command in `~/.xinitrc` or some equivalent in order to load the image file for the current theme on startup.
+
+`synchronicity random`
+
+* Place this command in `~/.xinitrc` or some equivalent in order to load a random theme on startup.
 
 ## Screenshots
 
